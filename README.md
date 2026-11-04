@@ -20,7 +20,14 @@
 没有代码签名,Windows SmartScreen 会提示"未识别的应用":点「更多信息」→「仍要运行」。需要系统自带的 WebView2 运行库(Windows 10/11 一般已经有,没有的话装 Edge 即可)。
 
 ### Mac 首次运行
-没有签名,直接双击会被 Gatekeeper 拦住:在 `.app` 上右键 →「打开」,或在终端执行 `xattr -cr QQQUSDT-Float.app` 后再打开。Apple 芯片用 `macos-arm64` 那个包,Intel 芯片用 `macos-intel` 那个。
+程序没有苹果的开发者签名和公证,macOS 会给下载来的文件加上隔离标记并拒绝运行(macOS 15 起「右键 → 打开」也绕不过去)。每个新下载的副本只需要在终端做一次,把 `.app` 放在「下载」或「桌面」等位置后,在它所在的目录执行:
+
+```
+xattr -cr QQQUSDT-Float.app
+codesign --force --deep --sign - QQQUSDT-Float.app
+```
+
+之后直接双击即可。如果这两条命令自己提示 `Operation not permitted`,把 `.app` 挪到 `~/Applications` 再做。Apple 芯片用 `macos-arm64` 那个包,Intel 芯片用 `macos-intel` 那个。解压请用 Mac 自带的方式(双击 zip),不要用第三方解压工具,否则 `.app` 里的符号链接可能丢失。
 
 ## 操作
 
