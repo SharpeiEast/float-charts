@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQQUSDT 实时蜡烛图</title>
+<style id="css">
+  :root { --bg:#10151c; --panel:#161c25; --fg:#d7dde5; --muted:#8793a1; --line:#273140; --accent:#3b82f6; --up:#2ebd6b; --dn:#e5534b; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; overflow:hidden; }
+  #app { display:flex; flex-direction:column; width:100vw; height:100vh; background:var(--bg); }
+  #hdr { display:flex; align-items:center; gap:10px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); font-size:13px; white-space:nowrap; overflow:hidden; }
+  .lb { color:var(--muted); font-size:12px; margin-right:-4px; }
+  .num { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .num.stale { opacity:0.45; }
+  #hdr { gap:8px; }
+  @media (max-width: 640px) { button { padding:2px 7px; } }
+  #dot { width:9px; height:9px; border-radius:50%; background:#777; flex:none; }
+  .sp { flex:1; }
+  button { font:inherit; padding:2px 9px; border:1px solid var(--line); background:transparent; color:var(--fg); border-radius:5px; cursor:pointer; }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  label { cursor:pointer; user-select:none; color:var(--muted); display:flex; align-items:center; gap:3px; }
+  #wrap { position:relative; flex:1; min-height:0; }
+  #cv { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
+  #msg { position:absolute; left:10px; bottom:26px; font-size:12px; color:var(--muted); pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="holder" style="display:none;padding:24px;color:#8793a1;font:14px sans-serif">浮窗已打开。关闭浮窗后图表会回到这里。</div>
+<div id="app">
+  <div id="hdr">
+    <span class="lb">QQQ</span><span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span>
+    <span class="lb" id="lbq">QQQUSDT</span><span id="px" class="num" title="币安 QQQUSDT 最新价">--</span><span id="dot" title="连接状态"></span>
+    <span class="sp"></span>
+    <span id="tfs"></span>
+    <label><input type="checkbox" id="bb" checked>布林</label>
+    <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
+  </div>
+  <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div></div>
+</div>
+<script>
+"use strict";
+const Q = new URLSearchParams(location.search);
+const MARKETS = {
+  perp: { sym: "QQQUSDT", label: "QQQUSDT 永续", short: "QQQUSDT", tag: "永续", rest: "https://fapi.binance.com/fapi/v1/klines", ws: "wss://fstream.binance.com/market/stream" },
+  spot: { sym: "QQQBUSDT", label: "QQQBUSDT 现货", short: "QQQBUSDT", tag: "现货", rest: "https://data-api.binance.vision/api/v3/klines", ws: "wss://data-stream.binance.vision/stream" }
+};
+const MK = MARKETS[Q.get("market")] || MARKETS.perp;
+const MOCK = Q.has("mock");
+const TFS = ["15m", "30m", "1h", "4h"];
+const TF_MS = { "15m": 9e5, "30m": 18e5, "1h": 36e5, "4h": 144e5 };
+const NB = 20, KB = 2;
+const $ = id => document.getElementById(id);
+const app = $("app"), cv = $("cv"), ctx = cv.getContext("2d");
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+
+let tf = TFS.includes(Q.get("tf")) ? Q.get("tf") : (TFS.includes(store("tf")) ? store("tf") : "15m");
+let bbOn = store("bb") !== "0";
+let candles = [], bands = [], ticker = null, tickerAt = 0, view = { n: 90, off: 0 }, hover = null;
+let ws = null, gen = 0, lastMsg = 0, status = "init", pollTimer = null, wd = null;
+
+$("lbq").textContent = MK.short;
+$("bb").checked = bbOn;
+TFS.forEach(t => { const b = document.createElement("button"); b.textContent = t; b.dataset.tf = t; if (t === tf) b.className = "on"; b.onclick = () => setTf(t); $("tfs").appendChild(b); });
+$("bb").onchange = () => { bbOn = $("bb").checked; store("bb", bbOn ? "1" : "0"); render(); };
+
+function setStatus(s, text) {
+  status = s;
+  $("dot").style.background = s === "live" ? "#2ebd6b" : s === "poll" ? "#e0a030" : s === "connecting" ? "#6a7683" : "#e5534b";
+  $("dot").title = text || s;
+  $("msg").textContent = (s === "live" || s === "init") ? "" : (text || "");
+}
+function setTf(t) {
+  tf = t; store("tf", t); view.off = 0;
+  document.querySelectorAll("#tfs button").forEach(b => b.classList.toggle("on", b.dataset.tf === t));
+  start();
+}
+
+// ---------- data ----------
+function parseK(a) { return { t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5] }; }
+function recomputeBands() {
+  bands = new Array(candles.length);
+  for (let i = 0; i < candles.length; i++) {
+    if (i < NB - 1) { bands[i] = null; continue; }
+    let s = 0, s2 = 0;
+    for (let j = i - NB + 1; j <= i; j++) { const c = candles[j].c; s += c; s2 += c * c; }
+    const m = s / NB, sd = Math.sqrt(Math.max(s2 / NB - m * m, 0));
+    bands[i] = { m, u: m + KB * sd, l: m - KB * sd };
+  }
+}
+function applyKline(k) {          // k: {t,o,h,l,c,v}
+  const last = candles[candles.length - 1];
+  if (last && last.t === k.t) candles[candles.length - 1] = k;
+  else if (!last || k.t > last.t) { candles.push(k); if (candles.length > 1500) candles.shift(); }
+  else return;
+  recomputeBands();
+}
+async function fetchKlines(limit) {
+  const u = MK.rest + "?symbol=" + MK.sym + "&interval=" + tf + "&limit=" + limit;
+  const r = await fetch(u);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return (await r.json()).map(parseK);
+}
+
+function closeWs() { if (ws) { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; } }
+async function start() {
+  const my = ++gen;
+  closeWs(); clearInterval(pollTimer); clearInterval(wd);
+  setStatus("connecting", "加载历史K线…");
+  if (MOCK) { mockStart(my); return; }
+  try {
+    candles = await fetchKlines(500);
+    if (my !== gen) return;
+    recomputeBands(); render();
+  } catch (e) { if (my !== gen) return; setStatus("err", "历史K线加载失败: " + e.message + " (3秒后重试)"); setTimeout(() => { if (my === gen) start(); }, 3000); return; }
+  connect(my);
+  wd = setInterval(() => {
+    if (my !== gen) return;
+    const age = Date.now() - lastMsg;
+    if (status === "live" && age > 20000) { setStatus("connecting", "行情停滞, 重连中…"); connect(my); }
+  }, 5000);
+}
+function connect(my) {
+  closeWs(); clearInterval(pollTimer);
+  const s = MK.sym.toLowerCase();
+  const url = MK.ws + "?streams=" + s + "@kline_" + tf + "/" + s + "@miniTicker";
+  lastMsg = Date.now();
+  setStatus("connecting", "连接行情流…");
+  let w;
+  try { w = new WebSocket(url); } catch (e) { startPoll(my); return; }
+  ws = w;
+  let gotAny = false;
+  const guard = setTimeout(() => { if (my === gen && !gotAny) { startPoll(my); } }, 10000);   // stream silent -> fall back to REST polling
+  w.onmessage = ev => {
+    if (my !== gen) return;
+    let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    const d = m.data || m;
+    gotAny = true; lastMsg = Date.now();
+    if (status !== "live") { clearInterval(pollTimer); setStatus("live", "实时 (WebSocket)"); }
+    if (d.e === "kline") { const k = d.k; applyKline({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }); }
+    else if (d.e === "24hrMiniTicker") { ticker = { c: +d.c, o: +d.o }; tickerAt = Date.now(); }
+    scheduleRender();
+  };
+  w.onclose = () => { clearTimeout(guard); if (my === gen) { setStatus("connecting", "连接断开, 2秒后重连…"); setTimeout(() => { if (my === gen) connect(my); }, 2000); } };
+  w.onerror = () => {};
+}
+function startPoll(my) {
+  if (my !== gen) return;
+  closeWs(); clearInterval(pollTimer);
+  setStatus("poll", "WebSocket 无数据, 改用 3 秒轮询");
+  const tick = async () => {
+    try { const ks = await fetchKlines(3); if (my !== gen) return; ks.forEach(applyKline); lastMsg = Date.now(); scheduleRender(); } catch (e) {}
+  };
+  tick(); pollTimer = setInterval(tick, 3000);
+}
+
+// ---------- mock (layout test only) ----------
+function mockStart(my) {
+  const step = TF_MS[tf], now = Math.floor(Date.now() / step) * step;
+  let p = 693, arr = [];
+  const rnd = (() => { let x = 12345; return () => (x = (x * 16807) % 2147483647) / 2147483647; })();
+  for (let i = 499; i >= 0; i--) {
+    const o = p, c = o + (rnd() - 0.5) * 3.2, h = Math.max(o, c) + rnd() * 1.4, l = Math.min(o, c) - rnd() * 1.4;
+    arr.push({ t: now - i * step, o, h, l, c, v: 100 }); p = c;
+  }
+  candles = arr; recomputeBands(); ticker = { c: p, o: arr[300].o }; tickerAt = Date.now() + 1e12;
+  setStatus("live", "MOCK 数据 (仅用于排版测试)"); render();
+}
+
+// ---------- drawing ----------
+let rafPending = 0;
+function scheduleRender() { if (rafPending) return; rafPending = setTimeout(() => { rafPending = 0; render(); }, 120); }
+const fmt = (v, d) => v.toFixed(d == null ? 2 : d);
+function niceStep(range, n) {
+  const raw = range / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
+}
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+function tlabel(ms, withDate) {
+  const d = new Date(ms), hm = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  return withDate ? pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " + hm : hm;
+}
+function cssv(name) { return getComputedStyle(app).getPropertyValue(name).trim(); }
+
+function render() {
+  const win = app.ownerDocument.defaultView, dpr = win.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect(), W = Math.max(60, Math.floor(rect.width)), H = Math.max(60, Math.floor(rect.height));
+  if (cv.width !== Math.floor(W * dpr) || cv.height !== Math.floor(H * dpr)) { cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const UP = cssv("--up") || "#2ebd6b", DN = cssv("--dn") || "#e5534b", FG = cssv("--fg") || "#ddd", MUT = cssv("--muted") || "#888", LINE = cssv("--line") || "#333";
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "11px -apple-system,Segoe UI,Microsoft YaHei,sans-serif";
+  const L = 6, R = 62, T = 8, B = 20, pw = W - L - R, ph = H - T - B;
+  if (!candles.length) return;
+
+  const n = Math.round(view.n);
+  view.off = Math.max(0, Math.min(view.off, Math.max(0, candles.length - 10)));
+  const end = candles.length - Math.round(view.off), first = end - n;
+  const i0 = Math.max(0, first), i1 = end - 1, step = pw / n;
+  const xOf = i => L + (i - first + 0.5) * step;
+
+  let lo = Infinity, hi = -Infinity;
+  for (let i = i0; i <= i1; i++) {
+    const c = candles[i]; lo = Math.min(lo, c.l); hi = Math.max(hi, c.h);
+    if (bbOn && bands[i]) { lo = Math.min(lo, bands[i].l); hi = Math.max(hi, bands[i].u); }
+  }
+  if (!(hi > lo)) { hi = lo + 1; }
+  const padv = (hi - lo) * 0.06; lo -= padv; hi += padv;
+  const yOf = v => T + (hi - v) / (hi - lo) * ph;
+
+  // grid + price axis
+  const st = niceStep(hi - lo, 5), g0 = Math.ceil(lo / st) * st;
+  ctx.lineWidth = 1; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  for (let v = g0; v < hi; v += st) {
+    const y = Math.round(yOf(v)) + 0.5;
+    ctx.strokeStyle = LINE; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillStyle = MUT; ctx.fillText(fmt(v, st < 1 ? 2 : st < 10 ? 1 : 0), L + pw + 6, y);
+  }
+  // time axis
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const every = Math.max(1, Math.round(n / 6));
+  for (let i = i0; i <= i1; i++) {
+    if ((candles.length - 1 - i) % every !== 0) continue;
+    const x = xOf(i), d = new Date(candles[i].t), prev = candles[i - 1] ? new Date(candles[i - 1].t) : null;
+    ctx.strokeStyle = LINE; ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, T + ph); ctx.lineTo(Math.round(x) + 0.5, T + ph + 3); ctx.stroke();
+    ctx.fillStyle = MUT; ctx.fillText(tlabel(candles[i].t, tf === "4h" || tf === "1h" || !prev || prev.getDate() !== d.getDate()), x, T + ph + 5);
+  }
+
+  // Bollinger
+  if (bbOn) {
+    ctx.beginPath(); let started = false;
+    for (let i = i0; i <= i1; i++) { if (!bands[i]) continue; const x = xOf(i), y = yOf(bands[i].u); if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y); }
+    for (let i = i1; i >= i0; i--) { if (!bands[i]) continue; ctx.lineTo(xOf(i), yOf(bands[i].l)); }
+    ctx.closePath(); ctx.fillStyle = "rgba(91,140,255,0.08)"; ctx.fill();
+    const line = (key, color, dash) => {
+      ctx.beginPath(); ctx.setLineDash(dash); ctx.strokeStyle = color; ctx.lineWidth = 1.1; let s = false;
+      for (let i = i0; i <= i1; i++) { if (!bands[i]) continue; const x = xOf(i), y = yOf(bands[i][key]); if (!s) { ctx.moveTo(x, y); s = true; } else ctx.lineTo(x, y); }
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    line("u", "#5b8cff", []); line("m", "#e0a030", [4, 3]); line("l", "#b07bff", []);
+  }
+
+  // candles
+  const bw = Math.max(1, Math.min(step * 0.7, 18));
+  for (let i = i0; i <= i1; i++) {
+    const c = candles[i], x = xOf(i), up = c.c >= c.o, col = up ? UP : DN;
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, yOf(c.h)); ctx.lineTo(Math.round(x) + 0.5, yOf(c.l)); ctx.stroke();
+    const y1 = yOf(Math.max(c.o, c.c)), y2 = yOf(Math.min(c.o, c.c));
+    ctx.fillRect(Math.round(x - bw / 2), y1, Math.max(1, Math.round(bw)), Math.max(1, y2 - y1));
+  }
+
+  // last price line
+  const lc = candles[candles.length - 1], ly = yOf(lc.c), lup = lc.c >= lc.o;
+  if (end === candles.length) {
+    ctx.setLineDash([3, 3]); ctx.strokeStyle = lup ? UP : DN; ctx.beginPath(); ctx.moveTo(L, Math.round(ly) + 0.5); ctx.lineTo(L + pw, Math.round(ly) + 0.5); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = lup ? UP : DN; ctx.fillRect(L + pw + 1, ly - 8, R - 2, 16);
+    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(fmt(lc.c), L + pw + 6, ly);
+  }
+
+  // legend (top-left): live values of the latest candle, or of the candle under the cursor while hovering
+  const inPlot = hover && hover.x >= L && hover.x <= L + pw && hover.y >= T && hover.y <= T + ph;
+  let idx = i1;
+  if (inPlot) idx = Math.max(i0, Math.min(i1, Math.round((hover.x - L) / step - 0.5 + first)));
+  {
+    const c = candles[idx], b = bands[idx], x = xOf(idx), liveBar = idx === candles.length - 1;
+    if (inPlot) {
+      ctx.strokeStyle = MUT; ctx.setLineDash([2, 3]);
+      ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, T); ctx.lineTo(Math.round(x) + 0.5, T + ph); ctx.moveTo(L, Math.round(hover.y) + 0.5); ctx.lineTo(L + pw, Math.round(hover.y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
+      const pv = lo + (1 - (hover.y - T) / ph) * (hi - lo);
+      ctx.fillStyle = "#2b3646"; ctx.fillRect(L + pw + 1, hover.y - 8, R - 2, 16); ctx.fillStyle = FG; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(fmt(pv), L + pw + 6, hover.y);
+    }
+    const t1 = (liveBar ? "● 当前 " : "") + tlabel(c.t, true) + "  O " + fmt(c.o) + "  H " + fmt(c.h) + "  L " + fmt(c.l) + "  C " + fmt(c.c);
+    const t2 = bbOn && b ? "BB  上 " + fmt(b.u) + "  中 " + fmt(b.m) + "  下 " + fmt(b.l) : "";
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    const w1 = Math.max(ctx.measureText(t1).width, ctx.measureText(t2).width) + 12, h1 = t2 ? 34 : 20;
+    ctx.fillStyle = "rgba(22,28,37,0.92)"; ctx.fillRect(L + 4, T + 2, w1, h1);
+    ctx.fillStyle = FG; ctx.fillText(t1, L + 10, T + 6); if (t2) { ctx.fillStyle = MUT; ctx.fillText(t2, L + 10, T + 21); }
+  }
+
+  // header: Binance last price (the Yahoo QQQ price is updated by the websocket handler above)
+  const px = ticker && Date.now() - tickerAt < 15000 ? ticker.c : lc.c;
+  $("px").textContent = fmt(px);
+}
+
+// ---------- interaction ----------
+cv.addEventListener("mousemove", e => {
+  const r = cv.getBoundingClientRect(); hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+  if (drag) { const step = (r.width - 68) / view.n, dx = e.clientX - drag.x; view.off = drag.off + dx / step; render(); } else render();
+});
+cv.addEventListener("mouseleave", () => { hover = null; render(); });
+let drag = null;
+cv.addEventListener("mousedown", e => { drag = { x: e.clientX, off: view.off }; });
+window.addEventListener("mouseup", () => { drag = null; });
+cv.addEventListener("mouseup", () => { drag = null; });
+cv.addEventListener("wheel", e => { e.preventDefault(); view.n = Math.max(20, Math.min(400, view.n * (e.deltaY > 0 ? 1.15 : 0.87))); render(); }, { passive: false });
+cv.addEventListener("dblclick", () => { view.n = 90; view.off = 0; render(); });
+
+
+// ---------- Yahoo QQQ price ----------
+// Primary: Yahoo's own websocket streamer (websockets are not subject to CORS, so a local page can use it directly).
+const MH = ["盘前", "盘中", "盘后", "延长时段", "夜盘"];
+let qqq = { price: null, at: 0, src: null, mh: null, tick: 0 };
+function readVarint(b, i) { let r = 0, s = 0; for (;;) { const x = b[i++]; r += (x & 127) * Math.pow(2, s); if (!(x & 128)) break; s += 7; } return [r, i]; }
+function decodeYahoo(b64) {
+  const bin = atob(b64), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+  const dv = new DataView(b.buffer); let i = 0; const out = {};
+  while (i < b.length) {
+    const t = readVarint(b, i); i = t[1]; const f = t[0] >> 3, w = t[0] & 7;
+    if (w === 0) { const v = readVarint(b, i); i = v[1]; out[f] = v[0]; }
+    else if (w === 5) { out[f] = dv.getFloat32(i, true); i += 4; }
+    else if (w === 1) { out[f] = dv.getFloat64(i, true); i += 8; }
+    else if (w === 2) { const l = readVarint(b, i); i = l[1]; out[f] = new TextDecoder().decode(b.slice(i, i + l[0])); i += l[0]; }
+    else break;
+  }
+  return out;
+}
+let yws = null, ySub = null, yRetry = null;
+function connectYahoo() {
+  clearInterval(ySub); clearTimeout(yRetry);
+  try { if (yws) { yws.onclose = null; yws.close(); } } catch (e) {}
+  let w;
+  try { w = new WebSocket("wss://streamer.finance.yahoo.com/?version=2"); } catch (e) { yRetry = setTimeout(connectYahoo, 5000); return; }
+  yws = w;
+  w.onopen = () => { w.send(JSON.stringify({ subscribe: ["QQQ"] })); ySub = setInterval(() => { try { w.send(JSON.stringify({ subscribe: ["QQQ"] })); } catch (e) {} }, 60000); };
+  w.onmessage = ev => {
+    let d; try { d = decodeYahoo(JSON.parse(ev.data).message); } catch (e) { return; }
+    if (d[1] !== "QQQ" || typeof d[2] !== "number" || !(d[2] > 0)) return;
+    qqq = { price: d[2], at: Date.now(), src: "ws", mh: d[7], tick: d[3] ? (d[3] % 2 === 0 ? d[3] / 2 : -(d[3] + 1) / 2) : Date.now() };
+    showQqq();
+  };
+  w.onclose = () => { clearInterval(ySub); yRetry = setTimeout(connectYahoo, 3000); };
+  w.onerror = () => {};
+}
+function showQqq() {
+  const el = $("qpx");
+  el.textContent = qqq.price == null ? "--" : fmt(qqq.price);
+  // dim when nothing has arrived for a while (normal when the market is closed and nobody trades)
+  el.classList.toggle("stale", qqq.price == null || Date.now() - qqq.at > 120000);
+  const hms = qqq.tick ? new Date(qqq.tick).toLocaleTimeString() : "";
+  el.title = qqq.price == null ? "等待 Yahoo QQQ 价格…" : "Yahoo QQQ (" + (qqq.mh != null && MH[qqq.mh] ? MH[qqq.mh] : "") + ") 最后更新 " + hms;
+}
+if (MOCK) { qqq = { price: 686.8, at: Date.now() + 1e12, src: "ws", mh: 0, tick: Date.now() }; showQqq(); }
+else { connectYahoo(); setInterval(showQqq, 5000); }
+
+// ---------- floating window (Document Picture-in-Picture) ----------
+let pipWin = null;
+$("pip").onclick = async () => {
+  if (pipWin) { pipWin.close(); return; }
+  if (!("documentPictureInPicture" in window)) { alert("当前浏览器不支持置顶浮窗。请用 Chrome 或 Edge 116 以上, 并用 https 或本地 file 方式打开本页。"); return; }
+  try {
+    const pw = await documentPictureInPicture.requestWindow({ width: 560, height: 360 });
+    pipWin = pw;
+    pw.document.title = MK.label;
+    pw.document.head.appendChild($("css").cloneNode(true));
+    pw.document.body.style.margin = "0";
+    pw.document.body.appendChild(app);
+    $("holder").style.display = "block"; $("pip").textContent = "收回";
+    pw.addEventListener("resize", () => render());
+    pw.addEventListener("pagehide", () => { document.body.appendChild(app); $("holder").style.display = "none"; $("pip").textContent = "浮窗"; pipWin = null; setTimeout(render, 50); });
+    setTimeout(render, 50);
+  } catch (e) { alert("打开浮窗失败: " + e.message); }
+};
+if (!("documentPictureInPicture" in window)) { $("pip").title = "此浏览器不支持置顶浮窗, 请用 Chrome/Edge 116+"; }
+window.addEventListener("resize", () => render());
+setInterval(() => render(), 1000);   // cheap safety net: re-fit when the window is resized without an event
+if (Q.has("diag")) document.title += "  [secure=" + window.isSecureContext + " pip=" + ("documentPictureInPicture" in window) + " ua=" + navigator.userAgent.match(/(Chrome|Edg)\/[\d.]+/g) + "]";
+start();
+</script>
+</body>
+</html>
