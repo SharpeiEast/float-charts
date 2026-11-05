@@ -164,13 +164,13 @@ async function srcEastmoney(first) {
   let name, pre, dec, out;
   if (tf === "1m") {
     const j = await getJson(base + "trends2/get?secid=" + sec + "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=2&iscr=0&_=" + Date.now());
-    if (!j || !j.data || !j.data.trends) throw new Error("没有数据");
+    if (!j || !j.data || !j.data.trends) throw new Error(j && j.rc === 102 ? "被限流(rc=102)" : "没有数据");
     name = j.data.name; pre = +j.data.preClose; dec = j.data.decimal; out = j.data.trends.map(s => parseRow(s.split(",")));
   } else {
     const beg = first || tf !== "1d" ? 0 : ymd(new Date(Date.now() - 40 * 864e5));
     const get = async fqt => getJson(base + "kline/get?secid=" + sec + "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=" + { "1d": 101, "1w": 102, "1M": 103 }[tf] + "&fqt=" + fqt + "&beg=" + beg + "&end=20500101&_=" + Date.now());
     let j = await get(1);
-    if (!j || !j.data || !j.data.klines) throw new Error("没有数据");
+    if (!j || !j.data || !j.data.klines) throw new Error(j && j.rc === 102 ? "被限流(rc=102)" : "没有数据");
     if (first && j.data.klines.some(s => +s.split(",")[4] <= 0)) { const j2 = await get(0); if (j2 && j2.data && j2.data.klines) j = j2; }
     name = j.data.name; dec = j.data.decimal; out = j.data.klines.map(s => parseRow(s.split(",")));
     try {                                         // previous close of the trading day comes from the minute data
