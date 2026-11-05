@@ -86,4 +86,4 @@ git tag ashare-v0.1.2
 git push origin ashare-v0.1.2      # GitHub Actions 构建并把文件挂到这个标签的 Release 上
 ```
 
-只改网页版时,改 `web/ashare_float.html` 后提交即可;程序版要重新打 tag 才会带上新页面。配置文件在 Windows `%APPDATA%\ashare-float\windows.json`,Mac `~/Library/Application Support/ashare-float/windows.json`,删掉它就恢复默认(默认打开 159577 一个窗口)。
+只改网页版时,改 `web/ashare_float.html` 后提交即可;程序版要重新打 tag 才会带上新页面。配置文件在 Windows `%APPDATA%\ashare-float\windows.json`,Mac `~/Library/Application Support/ashare-float/windows.json`,删掉它就恢复默认(默认打开 159577 一个窗口)。同一个目录里的 `app.log` 记录开关窗口和出错信息,遇到问题时把它发给开发者。
