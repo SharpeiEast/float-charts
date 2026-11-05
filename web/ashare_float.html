@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A股实时蜡烛图</title>
+<style>
+  :root { --bg:#10151c; --panel:#161c25; --fg:#d7dde5; --muted:#8793a1; --line:#273140; --accent:#3b82f6; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; overflow:hidden; }
+  #app { display:flex; flex-direction:column; width:100vw; height:100vh; background:var(--bg); }
+  #hdr { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); font-size:13px; white-space:nowrap; overflow:hidden; flex-wrap:wrap; row-gap:4px; }
+  #code { width:74px; font:inherit; font-weight:700; padding:2px 6px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:5px; outline:none; font-variant-numeric:tabular-nums; }
+  #code:focus { border-color:var(--accent); }
+  #name { max-width:120px; overflow:hidden; text-overflow:ellipsis; color:var(--muted); }
+  .num { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
+  #chg { font-size:13px; font-variant-numeric:tabular-nums; }
+  #dot { width:9px; height:9px; border-radius:50%; background:#777; flex:none; }
+  .sp { flex:1; }
+  button { font:inherit; padding:2px 9px; border:1px solid var(--line); background:transparent; color:var(--fg); border-radius:5px; cursor:pointer; }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:0.4; cursor:default; }
+  label { cursor:pointer; user-select:none; color:var(--muted); display:flex; align-items:center; gap:3px; }
+  #wrap { position:relative; flex:1; min-height:0; }
+  #cv { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
+  #msg { position:absolute; left:10px; bottom:26px; font-size:12px; color:var(--muted); pointer-events:none; }
+  #toast { position:absolute; right:10px; top:44px; background:#2b3646; color:var(--fg); padding:4px 10px; border-radius:5px; font-size:12px; display:none; z-index:5; }
+  @media (max-width: 680px) { #hdr { gap:5px; font-size:12px; } button { padding:2px 5px; } .num { font-size:16px; } #name { display:none; } #code { width:68px; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr">
+    <input id="code" maxlength="10" spellcheck="false" title="输入6位代码后回车。上证指数等指数请写 sh000001">
+    <span id="name"></span>
+    <span id="px" class="num">--</span><span id="chg"></span><span id="dot" title="连接状态"></span>
+    <span class="sp"></span>
+    <span id="tfs"></span>
+    <label><input type="checkbox" id="bb" checked>布林</label>
+    <button id="clr" title="切换涨跌颜色">绿涨</button>
+    <button id="add" title="再开一个窗口(最多3个)">＋</button>
+  </div>
+  <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div><div id="toast"></div></div>
+</div>
+<script>
+"use strict";
+const Q = new URLSearchParams(location.search);
+const TFS = ["1m", "1d", "1w", "1M"];
+const TF_LABEL = { "1m": "分时", "1d": "日", "1w": "周", "1M": "月" };
+const TF_TIP = { "1m": "当天分时(1分钟蜡烛)", "1d": "日K线", "1w": "周K线", "1M": "月K线" };
+const KLT = { "1d": 101, "1w": 102, "1M": 103 };
+const DEF_N = { "1m": 240, "1d": 90, "1w": 80, "1M": 60 };
+const NB = 20, KB = 2, MAX_WINS = 3;
+const $ = id => document.getElementById(id);
+const app = $("app"), cv = $("cv"), ctx = cv.getContext("2d");
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+
+let code = "", secid = "", ex = "", num = "", tf = TFS.includes(Q.get("tf")) ? Q.get("tf") : "1d";
+let bbOn = store("bb") !== "0", greenUp = store("clr") !== "r";
+let candles = [], bands = [], info = { name: "", pre: null }, view = { n: DEF_N[tf], off: 0 }, hover = null;
+let gen = 0, timer = null, lastOk = 0, fails = 0;
+
+$("bb").checked = bbOn;
+TFS.forEach(t => { const b = document.createElement("button"); b.textContent = TF_LABEL[t]; b.dataset.tf = t; b.title = TF_TIP[t]; if (t === tf) b.className = "on"; b.onclick = () => setTf(t); $("tfs").appendChild(b); });
+$("bb").onchange = () => { bbOn = $("bb").checked; store("bb", bbOn ? "1" : "0"); render(); };
+function syncClr() { $("clr").textContent = greenUp ? "绿涨" : "红涨"; }
+$("clr").onclick = () => { greenUp = !greenUp; store("clr", greenUp ? "g" : "r"); syncClr(); render(); };
+syncClr();
+window.addEventListener("storage", e => {          // other windows of the app changed a shared setting
+  if (e.key === "bb") { bbOn = e.newValue !== "0"; $("bb").checked = bbOn; }
+  if (e.key === "clr") { greenUp = e.newValue !== "r"; syncClr(); }
+  render();
+});
+
+function toast(t) { const el = $("toast"); el.textContent = t; el.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = "none", 2500); }
+function setStatus(s, text) {
+  $("dot").style.background = s === "live" ? "#2ebd6b" : s === "idle" ? "#6a7683" : s === "connecting" ? "#e0a030" : "#e5534b";
+  $("dot").title = text || s;
+  $("msg").textContent = (s === "live" || s === "idle") ? "" : (text || "");
+}
+
+// ---------- code -> eastmoney secid ----------
+function parseCode(s) {
+  const m = /^(sh|sz|bj)?\s*(\d{6})(?:\.(sh|sz|bj))?$/i.exec((s || "").trim());
+  if (!m) return null;
+  return { ex: (m[1] || m[3] || "").toLowerCase(), num: m[2] };
+}
+function setCode(s) {
+  const p = parseCode(s);
+  if (!p) { toast("请输入6位股票/基金代码,如 159577、600519"); $("code").value = code; return; }
+  ex = p.ex; num = p.num; code = (ex || "") + num; secid = code; $("code").value = code;
+  store("lastcode", code);
+  info = { name: "", pre: null, price: null }; $("name").textContent = ""; $("px").textContent = "--"; $("chg").textContent = "";
+  candles = []; bands = []; render();
+  report();
+  start();
+}
+function setTf(t) {
+  tf = t; view = { n: DEF_N[t], off: 0 };
+  document.querySelectorAll("#tfs button").forEach(b => b.classList.toggle("on", b.dataset.tf === t));
+  candles = []; bands = []; render();
+  report(); start();
+}
+function report() {
+  document.title = (info.name ? info.name + " " : "") + code;
+  try { if (window.pywebview && pywebview.api && pywebview.api.set_state) pywebview.api.set_state(code, tf, info.name || ""); } catch (e) {}
+}
+$("code").addEventListener("keydown", e => { if (e.key === "Enter") { setCode($("code").value); $("code").blur(); } });
+$("code").addEventListener("focus", () => $("code").select());
+
+// ---------- data ----------
+// Two sources, tried in this order on every refresh: Tencent (one request gives bars + quote), Eastmoney (fallback, two requests).
+// Both send "Access-Control-Allow-Origin: *", so the page talks to them directly from this computer.
+const TX_KEY = { "1d": "day", "1w": "week", "1M": "month" };
+let rows = [];                                       // all bars of the current period (intraday: includes the day before, only used to warm up the Bollinger bands)
+function tms(s) {                       // "YYYY-MM-DD", "YYYY-MM-DD HH:MM" or "YYYYMMDDHHMM" -> ms, kept as "wall clock in UTC" so labels do not depend on the PC's time zone
+  const a = /^\d{12}$/.test(s) ? [s.slice(0, 4), s.slice(4, 6), s.slice(6, 8), s.slice(8, 10), s.slice(10, 12)].map(Number) : s.split(/[- :]/).map(Number);
+  return Date.UTC(a[0], a[1] - 1, a[2], a[3] || 0, a[4] || 0);
+}
+function parseRow(a) {                  // [time, open, close, high, low, volume, ...] (both sources use this order)
+  const c = +a[2], o = +a[1] || c;      // Eastmoney's 09:30 auction row has open 0
+  return { t: tms(a[0]), o, c, h: +a[3] || Math.max(o, c), l: +a[4] || Math.min(o, c), v: +a[5] };
+}
+async function getJson(u) {
+  const r = await fetch(u, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function decOf(s) { s = String(s); const i = s.indexOf("."); return i < 0 ? 0 : s.length - i - 1; }
+function market() {                     // sh / sz / bj from the code (an explicit sh/sz/bj prefix wins)
+  if (ex) return ex;
+  const n = num;
+  if (n.startsWith("92") || "48".includes(n[0])) return "bj";
+  return "569".includes(n[0]) ? "sh" : "sz";
+}
+
+async function srcTencent(first) {
+  const sym = market() + num;
+  let j, list;
+  if (tf === "1m") {
+    j = await getJson("https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=" + sym + ",m1,," + (first ? 320 : 40) + "&_r=" + Date.now());
+    const d = j && j.data && j.data[sym];
+    if (!d || !d.m1) throw new Error("没有数据");
+    list = d.m1;
+  } else {
+    const key = TX_KEY[tf], cnt = first ? 2000 : 8;
+    const get = async adj => {
+      const jj = await getJson("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" + sym + "," + key + ",,," + cnt + "," + adj + "&_r=" + Date.now());
+      const dd = jj && jj.data && jj.data[sym];
+      if (!dd) throw new Error("没有数据");
+      return { dd, arr: dd["qfq" + key] || dd[key] };
+    };
+    let g = await get("qfq");
+    if (!g.arr) throw new Error("没有数据");
+    if (first && g.arr.some(a => +a[4] <= 0)) { const g2 = await get(""); if (g2.arr) g = g2; }   // early history of high-priced stocks goes negative when forward-adjusted: use unadjusted prices then
+    j = { data: { [sym]: g.dd } }; list = g.arr;
+  }
+  const qt = j.data[sym].qt && j.data[sym].qt[sym];
+  if (!qt || !(+qt[3] > 0 || list.length)) throw new Error("代码无效或没有数据");
+  return { name: qt[1], pre: +qt[4], price: +qt[3], dec: decOf(qt[3]), rows: list.map(parseRow) };
+}
+
+async function srcEastmoney(first) {
+  const sec = (market() === "sh" ? 1 : 0) + "." + num, base = "https://push2his.eastmoney.com/api/qt/stock/";
+  let name, pre, dec, out;
+  if (tf === "1m") {
+    const j = await getJson(base + "trends2/get?secid=" + sec + "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=2&iscr=0&_=" + Date.now());
+    if (!j || !j.data || !j.data.trends) throw new Error("没有数据");
+    name = j.data.name; pre = +j.data.preClose; dec = j.data.decimal; out = j.data.trends.map(s => parseRow(s.split(",")));
+  } else {
+    const beg = first || tf !== "1d" ? 0 : ymd(new Date(Date.now() - 40 * 864e5));
+    const get = async fqt => getJson(base + "kline/get?secid=" + sec + "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=" + { "1d": 101, "1w": 102, "1M": 103 }[tf] + "&fqt=" + fqt + "&beg=" + beg + "&end=20500101&_=" + Date.now());
+    let j = await get(1);
+    if (!j || !j.data || !j.data.klines) throw new Error("没有数据");
+    if (first && j.data.klines.some(s => +s.split(",")[4] <= 0)) { const j2 = await get(0); if (j2 && j2.data && j2.data.klines) j = j2; }
+    name = j.data.name; dec = j.data.decimal; out = j.data.klines.map(s => parseRow(s.split(",")));
+    try {                                         // previous close of the trading day comes from the minute data
+      const t = await getJson(base + "trends2/get?secid=" + sec + "&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0&_=" + Date.now());
+      pre = +t.data.preClose;
+    } catch (e) { pre = info.pre; }
+  }
+  return { name, pre, price: out.length ? out[out.length - 1].c : null, dec: dec || 2, rows: out };
+}
+function ymd(d) { return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); }
+
+function recomputeBands(arr) {
+  const out = new Array(arr.length);
+  for (let i = 0; i < arr.length; i++) {
+    if (i < NB - 1) { out[i] = null; continue; }
+    let s = 0, s2 = 0;
+    for (let j = i - NB + 1; j <= i; j++) { const c = arr[j].c; s += c; s2 += c * c; }
+    const m = s / NB, sd = Math.sqrt(Math.max(s2 / NB - m * m, 0));
+    out[i] = { m, u: m + KB * sd, l: m - KB * sd };
+  }
+  return out;
+}
+function mergeRows(fresh, replaceAll) {
+  if (replaceAll || !rows.length) rows = fresh.slice();
+  else if (fresh.length) { const t0 = fresh[0].t; rows = rows.filter(c => c.t < t0).concat(fresh); }
+  if (rows.length > 3000) rows = rows.slice(-3000);
+  const b = recomputeBands(rows);
+  let k = 0;
+  if (tf === "1m" && rows.length) {                  // intraday: show the latest trading day only; the day before just warms up the Bollinger bands
+    const day = new Date(rows[rows.length - 1].t).toISOString().slice(0, 10);
+    while (k < rows.length && new Date(rows[k].t).toISOString().slice(0, 10) !== day) k++;
+  }
+  candles = rows.slice(k); bands = b.slice(k);
+}
+function inSession() {                               // China time (UTC+8), weekdays
+  const d = new Date(Date.now() + 8 * 36e5), w = d.getUTCDay(), m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return w >= 1 && w <= 5 && ((m >= 9 * 60 + 14 && m <= 11 * 60 + 31) || (m >= 12 * 60 + 58 && m <= 15 * 60 + 6));
+}
+function showHeader() {
+  const last = candles[candles.length - 1];
+  if (!last) return;
+  const p = info.price > 0 ? info.price : last.c, pre = info.pre, d = dec();
+  $("px").textContent = fmt(p, d);
+  const UP = greenUp ? "#2ebd6b" : "#e5534b", DN = greenUp ? "#e5534b" : "#2ebd6b";
+  if (pre > 0) {
+    const df = p - pre, pc = df / pre * 100;
+    $("chg").textContent = (df >= 0 ? "+" : "") + fmt(df, d) + "  " + (df >= 0 ? "+" : "") + pc.toFixed(2) + "%";
+    $("chg").style.color = df >= 0 ? UP : DN; $("px").style.color = df >= 0 ? UP : DN;
+  }
+  $("name").textContent = info.name || "";
+  $("name").title = (info.name || "") + " " + code;
+}
+function dec() { return info.dec || 3; }
+
+const SOURCES = [["腾讯", srcTencent], ["东方财富", srcEastmoney]].filter(x => !Q.get("src") || (Q.get("src") === "em") === (x[0] === "东方财富"));   // ?src=em / ?src=tx forces one source (debugging)
+async function poll(my, first) {
+  const errs = [];
+  let res = null, used = "";
+  for (const [label, fn] of SOURCES) {
+    try { res = await fn(first); used = label; break; } catch (e) { errs.push(label + ": " + (e && e.message || e)); }
+    if (my !== gen) return;
+  }
+  if (my !== gen) return;
+  if (!res) {
+    fails++;
+    setStatus("err", "取数失败 (" + errs.join("; ") + ")" + (fails > 1 ? ", 已连续 " + fails + " 次" : ""));
+    return;
+  }
+  mergeRows(res.rows, first);
+  info.name = res.name || info.name; info.pre = res.pre > 0 ? res.pre : info.pre; info.price = res.price; info.dec = res.dec || info.dec;
+  if (first) report();
+  fails = 0; lastOk = Date.now(); info.src = used;
+  const sess = inSession();
+  setStatus(sess ? "live" : "idle", (sess ? "实时, 每3秒刷新" : "休市中, 每30秒刷新") + " · 数据源: " + used + (errs.length ? " (主源失败: " + errs[0] + ")" : ""));
+  showHeader(); render();
+}
+function start() {
+  const my = ++gen;
+  clearTimeout(timer);
+  rows = []; info.price = null;
+  if (!secid) return;
+  setStatus("connecting", "加载中…");
+  const loop = async first => {
+    if (my !== gen) return;
+    await poll(my, first);
+    if (my !== gen) return;
+    const wait = fails ? Math.min(30000, 3000 * (fails + 1)) : (inSession() ? 3000 : 30000);
+    timer = setTimeout(() => loop(false), wait);
+  };
+  loop(true);
+}
+
+// ---------- drawing ----------
+const fmt = (v, d) => v.toFixed(d == null ? 2 : d);
+function niceStep(range, n) {
+  const raw = range / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
+}
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+function tlabel(ms, withDate) {
+  const d = new Date(ms);
+  const Y = d.getUTCFullYear(), Mo = pad2(d.getUTCMonth() + 1), D = pad2(d.getUTCDate());
+  if (tf === "1d" || tf === "1w") return Y + "-" + Mo + "-" + D;
+  if (tf === "1M") return Y + "-" + Mo;
+  const hm = pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
+  return withDate ? Mo + "-" + D + " " + hm : hm;
+}
+function render() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect(), W = Math.max(60, Math.floor(rect.width)), H = Math.max(60, Math.floor(rect.height));
+  if (cv.width !== Math.floor(W * dpr) || cv.height !== Math.floor(H * dpr)) { cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const UP = greenUp ? "#2ebd6b" : "#e5534b", DN = greenUp ? "#e5534b" : "#2ebd6b", FG = "#d7dde5", MUT = "#8793a1", LINE = "#273140";
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "11px -apple-system,Segoe UI,Microsoft YaHei,sans-serif";
+  const L = 6, R = 58, T = 8, B = 20, pw = W - L - R, ph = H - T - B;
+  if (!candles.length) return;
+
+  const n = Math.min(Math.round(view.n), Math.max(20, candles.length + 3));
+  view.off = Math.max(0, Math.min(view.off, Math.max(0, candles.length - 10)));
+  const end = candles.length - Math.round(view.off), first = end - n;
+  const i0 = Math.max(0, first), i1 = end - 1, step = pw / n;
+  const xOf = i => L + (i - first + 0.5) * step;
+
+  let lo = Infinity, hi = -Infinity;
+  for (let i = i0; i <= i1; i++) {
+    const c = candles[i]; lo = Math.min(lo, c.l); hi = Math.max(hi, c.h);
+    if (bbOn && bands[i]) { lo = Math.min(lo, bands[i].l); hi = Math.max(hi, bands[i].u); }
+  }
+  if (!(hi > lo)) { hi = lo + 0.01; }
+  const padv = (hi - lo) * 0.06; lo -= padv; hi += padv;
+  const yOf = v => T + (hi - v) / (hi - lo) * ph;
+  const d = dec();
+
+  const st = niceStep(hi - lo, 5), g0 = Math.ceil(lo / st) * st;
+  ctx.lineWidth = 1; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  for (let v = g0; v < hi; v += st) {
+    const y = Math.round(yOf(v)) + 0.5;
+    ctx.strokeStyle = LINE; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillStyle = MUT; ctx.fillText(fmt(v, st < 0.01 ? 3 : st < 0.1 ? 2 : st < 1 ? 2 : st < 10 ? 1 : 0), L + pw + 6, y);
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const every = Math.max(1, Math.round(n / (W < 480 ? 4 : 6)));
+  for (let i = i0; i <= i1; i++) {
+    if ((candles.length - 1 - i) % every !== 0) continue;
+    const x = xOf(i);
+    ctx.strokeStyle = LINE; ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, T + ph); ctx.lineTo(Math.round(x) + 0.5, T + ph + 3); ctx.stroke();
+    ctx.fillStyle = MUT; ctx.fillText(tlabel(candles[i].t, false), x, T + ph + 5);
+  }
+
+  if (bbOn) {
+    ctx.beginPath(); let started = false;
+    for (let i = i0; i <= i1; i++) { if (!bands[i]) continue; const x = xOf(i), y = yOf(bands[i].u); if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y); }
+    for (let i = i1; i >= i0; i--) { if (!bands[i]) continue; ctx.lineTo(xOf(i), yOf(bands[i].l)); }
+    ctx.closePath(); ctx.fillStyle = "rgba(91,140,255,0.08)"; ctx.fill();
+    const line = (key, color, dash) => {
+      ctx.beginPath(); ctx.setLineDash(dash); ctx.strokeStyle = color; ctx.lineWidth = 1.1; let s = false;
+      for (let i = i0; i <= i1; i++) { if (!bands[i]) continue; const x = xOf(i), y = yOf(bands[i][key]); if (!s) { ctx.moveTo(x, y); s = true; } else ctx.lineTo(x, y); }
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    line("u", "#5b8cff", []); line("m", "#e0a030", [4, 3]); line("l", "#b07bff", []);
+  }
+
+  const bw = Math.max(1, Math.min(step * 0.7, 26));
+  for (let i = i0; i <= i1; i++) {
+    const c = candles[i], x = xOf(i), col = c.c >= c.o ? UP : DN;
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, yOf(c.h)); ctx.lineTo(Math.round(x) + 0.5, yOf(c.l)); ctx.stroke();
+    const y1 = yOf(Math.max(c.o, c.c)), y2 = yOf(Math.min(c.o, c.c));
+    ctx.fillRect(Math.round(x - bw / 2), y1, Math.max(1, Math.round(bw)), Math.max(1, y2 - y1));
+  }
+
+  const lc = candles[candles.length - 1], ly = yOf(lc.c), lcol = info.pre > 0 ? (lc.c >= info.pre ? UP : DN) : (lc.c >= lc.o ? UP : DN);
+  if (end === candles.length) {
+    ctx.setLineDash([3, 3]); ctx.strokeStyle = lcol; ctx.beginPath(); ctx.moveTo(L, Math.round(ly) + 0.5); ctx.lineTo(L + pw, Math.round(ly) + 0.5); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = lcol; ctx.fillRect(L + pw + 1, ly - 8, R - 2, 16);
+    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(fmt(lc.c, d), L + pw + 5, ly);
+  }
+  if (tf === "1m" && info.pre > 0 && info.pre > lo && info.pre < hi) {   // previous close
+    const y = Math.round(yOf(info.pre)) + 0.5;
+    ctx.setLineDash([1, 4]); ctx.strokeStyle = MUT; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  const inPlot = hover && hover.x >= L && hover.x <= L + pw && hover.y >= T && hover.y <= T + ph;
+  let idx = i1;
+  if (inPlot) idx = Math.max(i0, Math.min(i1, Math.round((hover.x - L) / step - 0.5 + first)));
+  {
+    const c = candles[idx], b = bands[idx], x = xOf(idx), liveBar = idx === candles.length - 1;
+    if (inPlot) {
+      ctx.strokeStyle = MUT; ctx.setLineDash([2, 3]);
+      ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, T); ctx.lineTo(Math.round(x) + 0.5, T + ph); ctx.moveTo(L, Math.round(hover.y) + 0.5); ctx.lineTo(L + pw, Math.round(hover.y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
+      const pv = lo + (1 - (hover.y - T) / ph) * (hi - lo);
+      ctx.fillStyle = "#2b3646"; ctx.fillRect(L + pw + 1, hover.y - 8, R - 2, 16); ctx.fillStyle = FG; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(fmt(pv, d), L + pw + 5, hover.y);
+    }
+    const t1 = (liveBar ? "● 当前 " : "") + tlabel(c.t, true) + "  开 " + fmt(c.o, d) + "  高 " + fmt(c.h, d) + "  低 " + fmt(c.l, d) + "  收 " + fmt(c.c, d);
+    const t2 = bbOn && b ? "布林  上 " + fmt(b.u, d) + "  中 " + fmt(b.m, d) + "  下 " + fmt(b.l, d) : "";
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    const w1 = Math.max(ctx.measureText(t1).width, ctx.measureText(t2).width) + 12, h1 = t2 ? 34 : 20;
+    ctx.fillStyle = "rgba(22,28,37,0.92)"; ctx.fillRect(L + 4, T + 2, w1, h1);
+    ctx.fillStyle = FG; ctx.fillText(t1, L + 10, T + 6); if (t2) { ctx.fillStyle = MUT; ctx.fillText(t2, L + 10, T + 21); }
+  }
+}
+
+// ---------- interaction ----------
+let drag = null;
+cv.addEventListener("mousemove", e => {
+  const r = cv.getBoundingClientRect(); hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+  if (drag) { const step = (r.width - 64) / Math.max(1, view.n), dx = e.clientX - drag.x; view.off = drag.off + dx / step; }
+  render();
+});
+cv.addEventListener("mouseleave", () => { hover = null; render(); });
+cv.addEventListener("mousedown", e => { drag = { x: e.clientX, off: view.off }; });
+window.addEventListener("mouseup", () => { drag = null; });
+cv.addEventListener("wheel", e => { e.preventDefault(); view.n = Math.max(20, Math.min(1500, view.n * (e.deltaY > 0 ? 1.15 : 0.87))); render(); }, { passive: false });
+cv.addEventListener("dblclick", () => { view.n = DEF_N[tf]; view.off = 0; render(); });
+window.addEventListener("resize", () => render());
+setInterval(() => render(), 1500);
+
+// ---------- more windows ----------
+const opened = [];
+$("add").onclick = async () => {
+  try {
+    if (window.pywebview && pywebview.api && pywebview.api.new_window) {
+      const r = await pywebview.api.new_window();
+      if (!r || !r.ok) toast((r && r.msg) || "最多同时打开 " + MAX_WINS + " 个窗口");
+      return;
+    }
+  } catch (e) { toast("打开新窗口失败: " + e); return; }
+  // plain browser: pop-up windows stacked downwards
+  for (let i = opened.length - 1; i >= 0; i--) if (opened[i].closed) opened.splice(i, 1);
+  if (opened.length >= MAX_WINS - 1) { toast("最多同时打开 " + MAX_WINS + " 个窗口"); return; }
+  const w = Math.max(420, window.outerWidth), h = window.outerHeight;
+  const win = window.open(location.pathname + "?code=" + (opened.length ? "159577" : "513850"), "_blank", "popup,width=" + w + ",height=" + h + ",left=" + window.screenX + ",top=" + (window.screenY + h * (opened.length + 1) + 8));
+  if (win) opened.push(win); else toast("浏览器拦截了弹出窗口, 请允许");
+};
+
+setCode(Q.get("code") || store("lastcode") || "513850");
+</script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+name: build-app
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: AShare-Float-windows
+          - os: macos-latest          # Apple silicon (M1/M2/M3...)
+            artifact: AShare-Float-macos-arm64
+          - os: macos-15-intel        # Intel Macs
+            artifact: AShare-Float-macos-intel
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'macos-15-intel' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r app/requirements.txt pyinstaller
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name AShare-Float --add-data "web;web" app/main.py
+          ls -la dist
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --clean --windowed --name AShare-Float --add-data "web:web" app/main.py
+          ls -la dist
+          ditto -c -k --keepParent dist/AShare-Float.app dist/${{ matrix.artifact }}.zip
+
+      - name: Smoke test (opens the window for ~12 s and reads the page)
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="dist/AShare-Float.exe"; else BIN="dist/AShare-Float.app/Contents/MacOS/AShare-Float"; fi
+          "$BIN" --selftest selftest.json &
+          PID=$!
+          for i in $(seq 1 90); do [ -f selftest.json ] && break; sleep 1; done
+          cat selftest.json || echo "selftest produced no output"
+          kill $PID 2>/dev/null || true
+
+      - name: Collect
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "$RUNNER_OS" = "Windows" ]; then cp dist/AShare-Float.exe "out/${{ matrix.artifact }}.exe"; else cp dist/${{ matrix.artifact }}.zip out/; fi
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/*
+
+      - name: Attach to the GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
