@@ -16,7 +16,7 @@ jobs:
         include:
           - os: windows-latest
             artifact: AShare-Float-windows
-          - os: macos-latest          # Apple silicon (M1/M2/M3...)
+          - os: macos-15              # Apple silicon (M1/M2/M3...)
             artifact: AShare-Float-macos-arm64
           - os: macos-15-intel        # Intel Macs
             artifact: AShare-Float-macos-intel
