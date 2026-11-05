@@ -15,8 +15,8 @@ import time
 import webview
 
 MAX_WINS = 3
-DEFAULT_CODES = ["513850", "159577", "161130"]
-DEFAULT = {"width": 560, "height": 300, "x": 80, "y": 40, "slots": [{"code": "513850", "tf": "1d"}]}
+DEFAULT_CODES = ["159577", "161130", "513850"]
+DEFAULT = {"width": 560, "height": 300, "x": 80, "y": 40, "slots": [{"code": "159577", "tf": "1d"}]}
 GAP = 30 if sys.platform == "darwin" else 4          # title-bar allowance between stacked windows
 
 

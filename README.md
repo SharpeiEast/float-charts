@@ -5,7 +5,7 @@
 | 项目 | 说明 | 下载 |
 |---|---|---|
 | [`qqqusdt-float/`](qqqusdt-float/) | 币安 QQQUSDT 永续合约实时蜡烛图,顶行显示 Yahoo QQQ 和 QQQUSDT 两个价格,15m / 30m / 1h / 4h / 1d / 1w / 1M 周期,布林线 | Releases 里标签为 `qqqusdt-v*`(更早的 `v0.1.x` 是合并前的旧版本) |
-| [`ashare-float/`](ashare-float/) | A 股实时蜡烛图,分时 / 日 / 周 / 月,布林线,最多 3 个窗口依次向下排列,数据来自腾讯和东方财富 | Releases 里标签为 `ashare-v*` |
+| [`ashare-float/`](ashare-float/) | A 股实时蜡烛图,分时 / 小时 / 日 / 周 / 月,布林线,最多 3 个窗口依次向下排列,数据来自腾讯和东方财富 | Releases 里标签为 `ashare-v*` |
 
 两个项目都有 Windows、Apple 芯片 Mac、Intel Mac 三种程序,也都带一个单文件网页版(`web/` 下)。使用方法见各目录的 README。
 

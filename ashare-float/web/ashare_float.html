@@ -44,11 +44,11 @@
 <script>
 "use strict";
 const Q = new URLSearchParams(location.search);
-const TFS = ["1m", "1d", "1w", "1M"];
-const TF_LABEL = { "1m": "分时", "1d": "日", "1w": "周", "1M": "月" };
-const TF_TIP = { "1m": "当天分时(1分钟蜡烛)", "1d": "日K线", "1w": "周K线", "1M": "月K线" };
+const TFS = ["1m", "1h", "1d", "1w", "1M"];
+const TF_LABEL = { "1m": "分时", "1h": "小时", "1d": "日", "1w": "周", "1M": "月" };
+const TF_TIP = { "1m": "当天分时(1分钟蜡烛)", "1h": "60分钟K线", "1d": "日K线", "1w": "周K线", "1M": "月K线" };
 const KLT = { "1d": 101, "1w": 102, "1M": 103 };
-const DEF_N = { "1m": 240, "1d": 90, "1w": 80, "1M": 60 };
+const DEF_N = { "1m": 240, "1h": 120, "1d": 90, "1w": 80, "1M": 60 };
 const NB = 20, KB = 2, MAX_WINS = 3;
 const $ = id => document.getElementById(id);
 const app = $("app"), cv = $("cv"), ctx = cv.getContext("2d");
@@ -111,6 +111,7 @@ $("code").addEventListener("focus", () => $("code").select());
 // Two sources, tried in this order on every refresh: Tencent (one request gives bars + quote), Eastmoney (fallback, two requests).
 // Both send "Access-Control-Allow-Origin: *", so the page talks to them directly from this computer.
 const TX_KEY = { "1d": "day", "1w": "week", "1M": "month" };
+const TX_MIN = { "1m": "m1", "1h": "m60" };          // Tencent minute-bar periods
 let rows = [];                                       // all bars of the current period (intraday: includes the day before, only used to warm up the Bollinger bands)
 function tms(s) {                       // "YYYY-MM-DD", "YYYY-MM-DD HH:MM" or "YYYYMMDDHHMM" -> ms, kept as "wall clock in UTC" so labels do not depend on the PC's time zone
   const a = /^\d{12}$/.test(s) ? [s.slice(0, 4), s.slice(4, 6), s.slice(6, 8), s.slice(8, 10), s.slice(10, 12)].map(Number) : s.split(/[- :]/).map(Number);
@@ -136,11 +137,12 @@ function market() {                     // sh / sz / bj from the code (an explic
 async function srcTencent(first) {
   const sym = market() + num;
   let j, list;
-  if (tf === "1m") {
-    j = await getJson("https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=" + sym + ",m1,," + (first ? 320 : 40) + "&_r=" + Date.now());
+  if (TX_MIN[tf]) {
+    const mk = TX_MIN[tf];
+    j = await getJson("https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=" + sym + "," + mk + ",," + (first ? 320 : 40) + "&_r=" + Date.now());
     const d = j && j.data && j.data[sym];
-    if (!d || !d.m1) throw new Error("没有数据");
-    list = d.m1;
+    if (!d || !d[mk]) throw new Error("没有数据");
+    list = d[mk];
   } else {
     const key = TX_KEY[tf], cnt = first ? 2000 : 8;
     const get = async adj => {
@@ -167,8 +169,8 @@ async function srcEastmoney(first) {
     if (!j || !j.data || !j.data.trends) throw new Error(j && j.rc === 102 ? "被限流(rc=102)" : "没有数据");
     name = j.data.name; pre = +j.data.preClose; dec = j.data.decimal; out = j.data.trends.map(s => parseRow(s.split(",")));
   } else {
-    const beg = first || tf !== "1d" ? 0 : ymd(new Date(Date.now() - 40 * 864e5));
-    const get = async fqt => getJson(base + "kline/get?secid=" + sec + "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=" + { "1d": 101, "1w": 102, "1M": 103 }[tf] + "&fqt=" + fqt + "&beg=" + beg + "&end=20500101&_=" + Date.now());
+    const beg = first ? (tf === "1h" ? ymd(new Date(Date.now() - 400 * 864e5)) : 0) : (tf === "1d" || tf === "1h" ? ymd(new Date(Date.now() - 40 * 864e5)) : 0);
+    const get = async fqt => getJson(base + "kline/get?secid=" + sec + "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=" + { "1h": 60, "1d": 101, "1w": 102, "1M": 103 }[tf] + "&fqt=" + fqt + "&beg=" + beg + "&end=20500101&_=" + Date.now());
     let j = await get(1);
     if (!j || !j.data || !j.data.klines) throw new Error(j && j.rc === 102 ? "被限流(rc=102)" : "没有数据");
     if (first && j.data.klines.some(s => +s.split(",")[4] <= 0)) { const j2 = await get(0); if (j2 && j2.data && j2.data.klines) j = j2; }
@@ -276,7 +278,7 @@ function tlabel(ms, withDate) {
   if (tf === "1d" || tf === "1w") return Y + "-" + Mo + "-" + D;
   if (tf === "1M") return Y + "-" + Mo;
   const hm = pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
-  return withDate ? Mo + "-" + D + " " + hm : hm;
+  return withDate || tf === "1h" ? Mo + "-" + D + " " + hm : hm;
 }
 function render() {
   const dpr = window.devicePixelRatio || 1;
@@ -403,11 +405,11 @@ $("add").onclick = async () => {
   for (let i = opened.length - 1; i >= 0; i--) if (opened[i].closed) opened.splice(i, 1);
   if (opened.length >= MAX_WINS - 1) { toast("最多同时打开 " + MAX_WINS + " 个窗口"); return; }
   const w = Math.max(420, window.outerWidth), h = window.outerHeight;
-  const win = window.open(location.pathname + "?code=" + (opened.length ? "159577" : "513850"), "_blank", "popup,width=" + w + ",height=" + h + ",left=" + window.screenX + ",top=" + (window.screenY + h * (opened.length + 1) + 8));
+  const win = window.open(location.pathname + "?code=" + (opened.length ? "161130" : "513850"), "_blank", "popup,width=" + w + ",height=" + h + ",left=" + window.screenX + ",top=" + (window.screenY + h * (opened.length + 1) + 8));
   if (win) opened.push(win); else toast("浏览器拦截了弹出窗口, 请允许");
 };
 
-setCode(Q.get("code") || store("lastcode") || "513850");
+setCode(Q.get("code") || store("lastcode") || "159577");
 </script>
 </body>
 </html>
