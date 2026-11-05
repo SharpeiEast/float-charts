@@ -11,6 +11,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 
 import webview
 
@@ -37,6 +38,18 @@ def config_path():
     return os.path.join(d, "windows.json")
 
 
+def log(msg):
+    """Append a line to app.log next to the config file (kept small); failures here must never break the app."""
+    try:
+        path = os.path.join(os.path.dirname(config_path()), "app.log")
+        if os.path.exists(path) and os.path.getsize(path) > 200000:
+            os.remove(path)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except Exception:
+        pass
+
+
 def load_cfg():
     try:
         with open(config_path(), encoding="utf-8") as fh:
@@ -55,7 +68,11 @@ class SlotApi:
         self._slot = slot
 
     def new_window(self):
-        return self._app.add_window()
+        try:
+            return self._app.add_window()
+        except Exception as exc:
+            log("new_window failed:\n" + traceback.format_exc())
+            return {"ok": False, "msg": "打开新窗口失败: %r (详情见 app.log)" % (exc,)}
 
     def set_state(self, code, tf, name):
         self._app.set_state(self._slot, code, tf, name)
@@ -69,6 +86,7 @@ class App:
         self.lock = threading.RLock()
         self.wins = {}        # slot -> window
         self.state = {}       # slot -> {"code", "tf"}
+        self.geo = {}         # slot -> [x, y, width, height], kept up to date from the moved/resized events (never read the window's properties from event handlers or other threads)
         self.html = resource(os.path.join("web", "ashare_float.html"))
 
     # ---- window creation ----
@@ -79,15 +97,17 @@ class App:
                                     x=int(x), y=int(y), min_size=(380, 220), on_top=True)
         self.wins[slot] = win
         self.state[slot] = {"code": str(code), "tf": str(tf)}
+        self.geo[slot] = [int(x), int(y), int(self.cfg["width"]), int(self.cfg["height"])]
         win.events.closed += lambda: self._closed(slot)
-        if not self.selftest:
-            win.events.closing += lambda: self._save_geometry(win)
+        win.events.moved += lambda mx, my: self._geo(slot, 0, mx, my)
+        win.events.resized += lambda mw, mh: self._geo(slot, 2, mw, mh)
+        win.events.closing += lambda: self._save_geometry(slot)
         return win
 
     def open_initial(self):
         slots = self.cfg["slots"][:MAX_WINS]
         if self.selftest:
-            slots = [{"code": "159577", "tf": "1d"}]
+            slots = [{"code": "159577", "tf": "1h"}]
         for i, s in enumerate(slots):
             y = int(self.cfg["y"]) + i * (int(self.cfg["height"]) + GAP)
             self._create(i, s["code"], s.get("tf", "1d"), self.cfg["x"], y)
@@ -102,16 +122,17 @@ class App:
             if not code:
                 code = next((c for c in DEFAULT_CODES if c not in used), DEFAULT_CODES[0])
             pitch = int(self.cfg["height"]) + GAP
-            above = [s for s in self.wins if s < slot]
-            below = [s for s in self.wins if s > slot]
+            above = [s for s in self.geo if s < slot]
+            below = [s for s in self.geo if s > slot]
             if above:                                   # directly under the nearest window above it (fills a gap left by a closed window)
-                ref = self.wins[max(above)]
-                x, y = ref.x, ref.y + ref.height + GAP
+                gx, gy, gw, gh = self.geo[max(above)]
+                x, y = gx, gy + gh + GAP
             elif below:                                 # slot 0 was closed: take its place above the others
-                ref = self.wins[min(below)]
-                x, y = ref.x, max(0, ref.y - pitch)
+                gx, gy, gw, gh = self.geo[min(below)]
+                x, y = gx, max(0, gy - pitch)
             else:
                 x, y = self.cfg["x"], self.cfg["y"]
+            log("add_window slot=%s code=%s at (%s, %s)" % (slot, code, x, y))
             self._create(slot, code, tf, x, y)
             self._save_slots()
             return {"ok": True, "slot": slot}
@@ -129,32 +150,41 @@ class App:
             except Exception:
                 pass
 
+    def _geo(self, slot, at, a, b):
+        try:
+            g = self.geo.get(slot)
+            if g is not None:
+                g[at], g[at + 1] = int(a), int(b)
+        except Exception:
+            pass
+
     def _closed(self, slot):
         with self.lock:
             self.wins.pop(slot, None)
-            if not self.selftest:
-                # keep the closed window's code out of the saved list
-                self.state.pop(slot, None)
-                self._save_slots()
-            else:
-                self.state.pop(slot, None)
+            self.state.pop(slot, None)       # keep the closed window's code out of the saved list
+            self.geo.pop(slot, None)
+            self._save_slots()
+        log("closed slot=%s, open now: %s" % (slot, sorted(self.wins)))
 
-    def _save_geometry(self, win):
+    def _save_geometry(self, slot):
         try:
-            self.cfg["width"], self.cfg["height"] = int(win.width), int(win.height)
-            top = min(self.wins.values(), key=lambda w: w.y)
-            self.cfg["x"], self.cfg["y"] = int(top.x), int(top.y)
+            g = self.geo.get(slot)
+            if g:
+                self.cfg["width"], self.cfg["height"] = g[2], g[3]
+            if self.geo:
+                top = min(self.geo.values(), key=lambda v: v[1])
+                self.cfg["x"], self.cfg["y"] = top[0], top[1]
         except Exception:
-            pass
+            log("save geometry failed:\n" + traceback.format_exc())
         self._write()
 
     def _save_slots(self):
-        if self.selftest:
-            return
         self.cfg["slots"] = [self.state[s] for s in sorted(self.state)][:MAX_WINS]
         self._write()
 
     def _write(self):
+        if self.selftest:
+            return
         try:
             with open(config_path(), "w", encoding="utf-8") as fh:
                 json.dump(self.cfg, fh, ensure_ascii=False)
@@ -172,9 +202,12 @@ PROBE = ("JSON.stringify({title: document.title, code: document.getElementById('
 def run_selftest(app, result_path):
     time.sleep(12)
     out = {"windows": [], "errors": []}
-    # open two more windows (minute and weekly view), then a 4th that must be refused
-    out["add2"] = app.add_window("513850", "1m")
-    out["add3"] = app.add_window("161130", "1w")
+    # the real path: the page's "+" button -> pywebview.api.new_window() -> a new window
+    win0 = app.wins[0]
+    win0.evaluate_js("document.getElementById('add').click()")
+    time.sleep(6)
+    out["click_add"] = {"toast": win0.evaluate_js("document.getElementById('toast').textContent"), "slots": sorted(app.wins)}
+    out["add3"] = app.add_window("513850", "1m")
     out["add4_refused"] = app.add_window()
     time.sleep(12)
     for slot in sorted(app.wins):
@@ -183,10 +216,7 @@ def run_selftest(app, result_path):
             r = json.loads(win.evaluate_js(PROBE))
         except Exception as exc:
             r = {"error": repr(exc)}
-        try:
-            r.update(x=win.x, y=win.y, w=win.width, h=win.height)
-        except Exception:
-            pass
+        r["geo"] = app.geo.get(slot)
         r["slot"] = slot
         out["windows"].append(r)
     # close the middle window on its own, the other two must stay; then a new one takes its place
@@ -198,7 +228,7 @@ def run_selftest(app, result_path):
         out["readd"] = app.add_window("600519", "1d")
         time.sleep(8)
         out["after_readd_slots"] = sorted(app.wins)
-        out["after_readd_pos"] = {str(k): [app.wins[k].x, app.wins[k].y] for k in sorted(app.wins)}
+        out["after_readd_pos"] = {str(k): app.geo[k][:2] for k in sorted(app.geo)}
     with open(result_path, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False)
     for win in list(app.wins.values()):
