@@ -67,10 +67,10 @@ codesign --force --deep --sign - AShare-Float.app
 ```
 web/ashare_float.html       界面和取数(唯一的界面源码,程序版也用它)
 app/main.py                 程序版外壳(pywebview):多窗口管理、置顶、记忆位置
-.github/workflows/build.yml 打 tag 时自动构建 Windows / Mac 程序并上传到 Releases
+.github/workflows/build-ashare.yml(仓库根目录)打标签时自动构建 Windows / Mac 程序并上传到 Releases
 ```
 
-本地运行程序版:
+本地运行程序版(在本目录下):
 
 ```
 pip install -r app/requirements.txt
@@ -78,11 +78,11 @@ python app/main.py                         # 正常运行
 python app/main.py --selftest out.json     # 自检:打开 3 个窗口、测试添加/关闭/补位,把结果写进 out.json
 ```
 
-发布新版本:
+发布新版本(标签带项目前缀,只会构建这个项目):
 
 ```
-git tag v0.1.1
-git push origin v0.1.1      # GitHub Actions 会构建并把文件挂到这个 tag 的 Release 上
+git tag ashare-v0.1.2
+git push origin ashare-v0.1.2      # GitHub Actions 构建并把文件挂到这个标签的 Release 上
 ```
 
 只改网页版时,改 `web/ashare_float.html` 后提交即可;程序版要重新打 tag 才会带上新页面。配置文件在 Windows `%APPDATA%\ashare-float\windows.json`,Mac `~/Library/Application Support/ashare-float/windows.json`,删掉它就恢复默认。

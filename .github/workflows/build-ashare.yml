@@ -1,8 +1,8 @@
-name: build-app
+name: build-ashare
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["ashare-v*"]
   workflow_dispatch:
 
 permissions:
@@ -21,6 +21,9 @@ jobs:
           - os: macos-15-intel        # Intel Macs
             artifact: AShare-Float-macos-intel
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ashare-float
     continue-on-error: ${{ matrix.os == 'macos-15-intel' }}
     steps:
       - uses: actions/checkout@v4
@@ -69,10 +72,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: out/*
+          path: ashare-float/out/*
 
       - name: Attach to the GitHub release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/ashare-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: out/*
+          files: ashare-float/out/*

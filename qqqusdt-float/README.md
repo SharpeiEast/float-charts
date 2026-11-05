@@ -60,10 +60,10 @@ codesign --force --deep --sign - QQQUSDT-Float.app
 ```
 web/qqqusdt_float.html     网页版,也是程序版的界面(唯一的界面源码)
 app/main.py                程序版外壳(pywebview)
-.github/workflows/build.yml 打 tag 时自动构建 Windows / Mac 程序并上传到 Releases
+.github/workflows/build-qqqusdt.yml(仓库根目录)打标签时自动构建 Windows / Mac 程序并上传到 Releases
 ```
 
-本地运行程序版:
+本地运行程序版(在本目录下):
 
 ```
 pip install -r app/requirements.txt
@@ -71,11 +71,11 @@ python app/main.py                         # 正常运行
 python app/main.py --selftest out.json     # 自检:打开窗口 12 秒,把页面读到的数字写进 out.json
 ```
 
-发布新版本:
+发布新版本(标签带项目前缀,只会构建这个项目):
 
 ```
-git tag v0.1.1
-git push origin v0.1.1      # GitHub Actions 会构建并把文件挂到这个 tag 的 Release 上
+git tag qqqusdt-v0.1.4
+git push origin qqqusdt-v0.1.4      # GitHub Actions 构建并把文件挂到这个标签的 Release 上
 ```
 
 只改网页版的话,改 `web/qqqusdt_float.html` 后提交即可;程序版要重新打 tag 才会带上新页面。
