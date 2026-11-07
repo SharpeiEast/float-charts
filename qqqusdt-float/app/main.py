@@ -1,10 +1,10 @@
 """Desktop wrapper for the float page: web/qqqusdt_float.html shown in native always-on-top windows.
 
-Up to MAX_WINS windows, each showing one instrument chosen from the page's drop-down (QQQUSDT on Binance, OKX ETH
-perpetual, OKX BTC perpetual). A new window opens right below the lowest existing one; every window can be closed on
-its own. The page talks to Binance, Yahoo and OKX directly from this computer (no server of ours in between).
+Up to MAX_WINS windows, each showing one instrument chosen from the page's drop-down (QQQUSDT, ETH perpetual, BTC
+perpetual, all on Binance). A new window opens right below the lowest existing one; every window can be closed on
+its own. The page talks to Binance and Yahoo directly from this computer (no server of ours in between).
 
-Run:        python app/main.py            (add --spot for Binance spot QQQBUSDT instead of the perpetual)
+Run:        python app/main.py            (add --spot for Binance spot symbols instead of the perpetuals)
 Self-test:  python app/main.py --selftest result.json   (opens windows, waits, writes what the pages show, exits)
 """
 import json
@@ -20,7 +20,7 @@ MAX_WINS = 3
 DEFAULT_INSTS = ["qqq", "eth", "btc"]
 DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": "15m"}]}
 GAP = 30 if sys.platform == "darwin" else 4          # title-bar allowance between stacked windows
-TITLES = {"qqq": "QQQUSDT", "eth": "OKX ETH 永续", "btc": "OKX BTC 永续"}
+TITLES = {"qqq": "QQQUSDT", "eth": "ETH 永续", "btc": "BTC 永续"}
 
 
 def resource(rel):
