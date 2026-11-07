@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QQQUSDT 实时蜡烛图</title>
+<title>QQQUSDT / OKX 实时蜡烛图</title>
 <style id="css">
   :root { --bg:#10151c; --panel:#161c25; --fg:#d7dde5; --muted:#8793a1; --line:#273140; --accent:#3b82f6; --up:#2ebd6b; --dn:#e5534b; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; overflow:hidden; }
@@ -21,6 +21,8 @@
   label { cursor:pointer; user-select:none; color:var(--muted); display:flex; align-items:center; gap:3px; }
   #wrap { position:relative; flex:1; min-height:0; }
   #cv { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
+  select { font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
+  #toast { position:absolute; right:10px; top:44px; background:#2b3646; color:var(--fg); padding:4px 10px; border-radius:5px; font-size:12px; display:none; z-index:5; }
   #msg { position:absolute; left:10px; bottom:26px; font-size:12px; color:var(--muted); pointer-events:none; }
 </style>
 </head>
@@ -28,23 +30,37 @@
 <div id="holder" style="display:none;padding:24px;color:#8793a1;font:14px sans-serif">浮窗已打开。关闭浮窗后图表会回到这里。</div>
 <div id="app">
   <div id="hdr">
-    <span class="lb">QQQ</span><span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span>
-    <span class="lb" id="lbq">QQQUSDT</span><span id="px" class="num" title="币安 QQQUSDT 最新价">--</span><span id="dot" title="连接状态"></span>
+    <select id="inst" title="选择品种"></select>
+    <span id="qq"><span class="lb">QQQ</span> <span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span></span>
+    <span class="lb" id="lbq">QQQUSDT</span><span id="px" class="num" title="最新价">--</span><span id="dot" title="连接状态"></span>
     <span class="sp"></span>
     <span id="tfs"></span>
     <label><input type="checkbox" id="bb" checked>布林</label>
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
+    <button id="add" title="再开一个窗口(最多3个)">＋</button>
   </div>
-  <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div></div>
+  <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div><div id="toast"></div></div>
 </div>
 <script>
 "use strict";
 const Q = new URLSearchParams(location.search);
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 const MARKETS = {
   perp: { sym: "QQQUSDT", label: "QQQUSDT 永续", short: "QQQUSDT", tag: "永续", rest: "https://fapi.binance.com/fapi/v1/klines", ws: "wss://fstream.binance.com/market/stream" },
   spot: { sym: "QQQBUSDT", label: "QQQBUSDT 现货", short: "QQQBUSDT", tag: "现货", rest: "https://data-api.binance.vision/api/v3/klines", ws: "wss://data-stream.binance.vision/stream" }
 };
-const MK = MARKETS[Q.get("market")] || MARKETS.perp;
+const BN = MARKETS[Q.get("market")] || MARKETS.perp;
+const MAX_WINS = 3;
+// selectable instruments: Binance QQQUSDT (with the Yahoo QQQ price next to it) and two OKX perpetual swaps
+const INSTS = {
+  qqq: { label: "QQQ · 币安 QQQUSDT", short: BN.short, venue: "binance", title: "QQQUSDT" },
+  eth: { label: "OKX · ETH 永续", short: "ETH-USDT-SWAP", venue: "okx", id: "ETH-USDT-SWAP", title: "OKX ETH 永续" },
+  btc: { label: "OKX · BTC 永续", short: "BTC-USDT-SWAP", venue: "okx", id: "BTC-USDT-SWAP", title: "OKX BTC 永续" }
+};
+const OKX = { rest: "https://www.okx.com/api/v5/market/candles", ws: "wss://ws.okx.com/ws/v5/business",
+  bar: { "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1Dutc", "1w": "1Wutc", "1M": "1Mutc" } };
+let inst = INSTS[Q.get("inst")] ? Q.get("inst") : (INSTS[store("inst")] ? store("inst") : "qqq");
+const MK = new Proxy({}, { get: (_, k) => BN[k] });   // Binance endpoints of the QQQ instrument
 const MOCK = Q.has("mock");
 const TFS = ["15m", "30m", "1h", "4h", "1d", "1w", "1M"];
 const TF_TIP = { "15m": "15 分钟", "30m": "30 分钟", "1h": "1 小时", "4h": "4 小时", "1d": "日K线", "1w": "周K线", "1M": "月K线" };
@@ -52,17 +68,33 @@ const TF_MS = { "15m": 9e5, "30m": 18e5, "1h": 36e5, "4h": 144e5, "1d": 864e5, "
 const NB = 20, KB = 2;
 const $ = id => document.getElementById(id);
 const app = $("app"), cv = $("cv"), ctx = cv.getContext("2d");
-function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 
 let tf = TFS.includes(Q.get("tf")) ? Q.get("tf") : (TFS.includes(store("tf")) ? store("tf") : "15m");
 let bbOn = store("bb") !== "0";
 let candles = [], bands = [], ticker = null, tickerAt = 0, view = { n: 90, off: 0 }, hover = null;
 let ws = null, gen = 0, lastMsg = 0, status = "init", pollTimer = null, wd = null;
 
-$("lbq").textContent = MK.short;
+Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INSTS[k].label; $("inst").appendChild(o); });
+$("inst").value = inst;
 $("bb").checked = bbOn;
 TFS.forEach(t => { const b = document.createElement("button"); b.textContent = t; b.dataset.tf = t; b.title = TF_TIP[t]; if (t === tf) b.className = "on"; b.onclick = () => setTf(t); $("tfs").appendChild(b); });
 $("bb").onchange = () => { bbOn = $("bb").checked; store("bb", bbOn ? "1" : "0"); render(); };
+window.addEventListener("storage", e => { if (e.key === "bb") { bbOn = e.newValue !== "0"; $("bb").checked = bbOn; render(); } });   // other windows of the app
+function toast(t) { const el = $("toast"); el.textContent = t; el.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = "none", 2500); }
+function reportState() { try { if (window.pywebview && pywebview.api && pywebview.api.set_state) pywebview.api.set_state(inst, tf, INSTS[inst].title); } catch (e) {} }
+function setInst(k) {
+  if (!INSTS[k]) return;
+  inst = k; store("inst", k); view.off = 0; candles = []; bands = []; ticker = null;
+  $("inst").value = k;
+  $("qq").style.display = k === "qqq" ? "" : "none";
+  $("lbq").textContent = INSTS[k].short;
+  $("px").textContent = "--"; $("px").title = INSTS[k].venue === "okx" ? "OKX " + INSTS[k].short + " 最新价" : "币安 " + MK.short + " 最新价";
+  document.title = INSTS[k].title;
+  if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
+  reportState();
+  start();
+}
+$("inst").onchange = () => setInst($("inst").value);
 
 function setStatus(s, text) {
   status = s;
@@ -71,7 +103,7 @@ function setStatus(s, text) {
   $("msg").textContent = (s === "live" || s === "init") ? "" : (text || "");
 }
 function setTf(t) {
-  tf = t; store("tf", t); view.off = 0;
+  tf = t; store("tf", t); view.off = 0; reportState();
   document.querySelectorAll("#tfs button").forEach(b => b.classList.toggle("on", b.dataset.tf === t));
   start();
 }
@@ -95,7 +127,22 @@ function applyKline(k) {          // k: {t,o,h,l,c,v}
   else return;
   recomputeBands();
 }
+async function fetchOkx(limit) {                // OKX answers newest-first, at most 300 per page; "after" pages further back
+  const bar = OKX.bar[tf], id = INSTS[inst].id, out = [];
+  let after = "";
+  while (out.length < limit) {
+    const r = await fetch(OKX.rest + "?instId=" + id + "&bar=" + bar + "&limit=" + Math.min(300, limit - out.length) + after);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (j.code !== "0") throw new Error("OKX " + j.code + " " + j.msg);
+    if (!j.data.length) break;
+    out.push(...j.data);
+    after = "&after=" + j.data[j.data.length - 1][0];
+  }
+  return out.reverse().map(a => ({ t: +a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5] }));
+}
 async function fetchKlines(limit) {
+  if (INSTS[inst].venue === "okx") return fetchOkx(limit);
   const u = MK.rest + "?symbol=" + MK.sym + "&interval=" + tf + "&limit=" + limit;
   const r = await fetch(u);
   if (!r.ok) throw new Error("HTTP " + r.status);
@@ -120,7 +167,36 @@ async function start() {
     if (status === "live" && age > 20000) { setStatus("connecting", "行情停滞, 重连中…"); connect(my); }
   }, 5000);
 }
+function connectOkx(my) {
+  closeWs(); clearInterval(pollTimer);
+  lastMsg = Date.now();
+  setStatus("connecting", "连接 OKX 行情流…");
+  const id = INSTS[inst].id;
+  let w;
+  try { w = new WebSocket(OKX.ws); } catch (e) { startPoll(my); return; }
+  ws = w;
+  let gotAny = false, pingT = null;
+  const guard = setTimeout(() => { if (my === gen && !gotAny) startPoll(my); }, 10000);
+  w.onopen = () => {
+    w.send(JSON.stringify({ op: "subscribe", args: [{ channel: "candle" + OKX.bar[tf], instId: id }] }));
+    pingT = setInterval(() => { try { w.send("ping"); } catch (e) {} }, 20000);        // OKX closes silent connections after 30 s
+  };
+  w.onmessage = ev => {
+    if (my !== gen) return;
+    lastMsg = Date.now();
+    if (ev.data === "pong") return;
+    let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (!m.data || !m.arg || !String(m.arg.channel).startsWith("candle")) return;
+    gotAny = true;
+    if (status !== "live") { clearInterval(pollTimer); setStatus("live", "实时 (OKX WebSocket)"); }
+    m.data.forEach(a => applyKline({ t: +a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5] }));
+    scheduleRender();
+  };
+  w.onclose = () => { clearTimeout(guard); clearInterval(pingT); if (my === gen) { setStatus("connecting", "连接断开, 2秒后重连…"); setTimeout(() => { if (my === gen) connectOkx(my); }, 2000); } };
+  w.onerror = () => {};
+}
 function connect(my) {
+  if (INSTS[inst].venue === "okx") { connectOkx(my); return; }
   closeWs(); clearInterval(pollTimer);
   const s = MK.sym.toLowerCase();
   const url = MK.ws + "?streams=" + s + "@kline_" + tf + "/" + s + "@miniTicker";
@@ -157,10 +233,10 @@ function startPoll(my) {
 // ---------- mock (layout test only) ----------
 function mockStart(my) {
   const step = TF_MS[tf], now = Math.floor(Date.now() / step) * step;
-  let p = 693, arr = [];
+  let p = inst === "btc" ? 76000 : inst === "eth" ? 2245 : 693, arr = [];
   const rnd = (() => { let x = 12345; return () => (x = (x * 16807) % 2147483647) / 2147483647; })();
   for (let i = 499; i >= 0; i--) {
-    const o = p, c = o + (rnd() - 0.5) * 3.2, h = Math.max(o, c) + rnd() * 1.4, l = Math.min(o, c) - rnd() * 1.4;
+    const k = p / 693, o = p, c = o + (rnd() - 0.5) * 3.2 * k, h = Math.max(o, c) + rnd() * 1.4 * k, l = Math.min(o, c) - rnd() * 1.4 * k;
     arr.push({ t: now - i * step, o, h, l, c, v: 100 }); p = c;
   }
   candles = arr; recomputeBands(); ticker = { c: p, o: arr[300].o }; tickerAt = Date.now() + 1e12;
@@ -319,6 +395,11 @@ function decodeYahoo(b64) {
   return out;
 }
 let yws = null, ySub = null, yRetry = null;
+function stopYahoo() {
+  clearInterval(ySub); clearTimeout(yRetry);
+  try { if (yws) { yws.onclose = null; yws.onmessage = null; yws.close(); } } catch (e) {}
+  yws = null;
+}
 function connectYahoo() {
   clearInterval(ySub); clearTimeout(yRetry);
   try { if (yws) { yws.onclose = null; yws.close(); } } catch (e) {}
@@ -344,7 +425,7 @@ function showQqq() {
   el.title = qqq.price == null ? "等待 Yahoo QQQ 价格…" : "Yahoo QQQ (" + (qqq.mh != null && MH[qqq.mh] ? MH[qqq.mh] : "") + ") 最后更新 " + hms;
 }
 if (MOCK) { qqq = { price: 686.8, at: Date.now() + 1e12, src: "ws", mh: 0, tick: Date.now() }; showQqq(); }
-else { connectYahoo(); setInterval(showQqq, 5000); }
+else { setInterval(showQqq, 5000); }
 
 // ---------- floating window (Document Picture-in-Picture) ----------
 let pipWin = null;
@@ -367,8 +448,21 @@ $("pip").onclick = async () => {
 if (!("documentPictureInPicture" in window)) { $("pip").title = "此浏览器不支持置顶浮窗, 请用 Chrome/Edge 116+"; }
 window.addEventListener("resize", () => render());
 setInterval(() => render(), 1000);   // cheap safety net: re-fit when the window is resized without an event
+$("add").onclick = async () => {
+  try {
+    if (window.pywebview && pywebview.api && pywebview.api.new_window) {
+      const r = await pywebview.api.new_window();
+      if (!r || !r.ok) toast((r && r.msg) || "最多同时打开 " + MAX_WINS + " 个窗口");
+      return;
+    }
+  } catch (e) { toast("打开新窗口失败: " + e); return; }
+  // plain browser: open another page with the next instrument
+  const keys = Object.keys(INSTS), nxt = keys[(keys.indexOf(inst) + 1) % keys.length];
+  const w = window.open(location.pathname + "?inst=" + nxt + "&tf=" + tf, "_blank", "popup,width=620,height=360");
+  if (!w) toast("浏览器拦截了弹出窗口, 请允许");
+};
 if (Q.has("diag")) document.title += "  [secure=" + window.isSecureContext + " pip=" + ("documentPictureInPicture" in window) + " ua=" + navigator.userAgent.match(/(Chrome|Edg)\/[\d.]+/g) + "]";
-start();
+setInst(inst);
 </script>
 </body>
 </html>

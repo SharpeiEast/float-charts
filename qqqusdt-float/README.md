@@ -1,11 +1,12 @@
 # QQQUSDT Float
 
-一个可以挂在桌面上的小窗口,实时显示币安 QQQUSDT(永续合约)的蜡烛图,顶行只有两个数字:
+一个可以挂在桌面上的小窗口,实时显示蜡烛图。每个窗口左上角有一个**下拉菜单**选品种,目前三项:
 
-- **QQQ**:Yahoo 的 QQQ 最新价(盘前、盘中、盘后、夜盘都取最新)
-- **QQQUSDT**:币安 QQQUSDT 永续合约最新价
+- **QQQ · 币安 QQQUSDT**:币安 QQQUSDT 永续合约。顶行同时显示 Yahoo 的 QQQ 最新价(盘前、盘中、盘后、夜盘都取最新)和 QQQUSDT 最新价
+- **OKX · ETH 永续**:OKX 的 `ETH-USDT-SWAP`
+- **OKX · BTC 永续**:OKX 的 `BTC-USDT-SWAP`
 
-支持 15 分钟 / 30 分钟 / 1 小时 / 4 小时 / 日(1d)/ 周(1w)/ 月(1M)周期,可开关布林线(20 根均线 ± 2σ)。所有数据都由你自己的电脑直接连币安和 Yahoo,不经过任何中转服务器。
+支持 15 分钟 / 30 分钟 / 1 小时 / 4 小时 / 日(1d)/ 周(1w)/ 月(1M)周期,可开关布林线(20 根均线 ± 2σ)。所有数据都由你自己的电脑直接连币安、Yahoo 和 OKX,不经过任何中转服务器。
 
 ## 两种用法
 
@@ -29,14 +30,23 @@ codesign --force --deep --sign - QQQUSDT-Float.app
 
 之后直接双击即可。如果这两条命令自己提示 `Operation not permitted`,把 `.app` 挪到 `~/Applications` 再做。Apple 芯片用 `macos-arm64` 那个包,Intel 芯片用 `macos-intel` 那个。解压请用 Mac 自带的方式(双击 zip),不要用第三方解压工具,否则 `.app` 里的符号链接可能丢失。
 
+## 多窗口(程序版)
+
+- 右上角 **＋** 再开一个窗口,最多同时 3 个;新窗口出现在现有窗口的正下方,第一次依次是 QQQ、OKX ETH、OKX BTC(已经开着的品种会跳过)
+- 每个窗口可以单独关闭,关掉中间的窗口后再点 ＋,新窗口会补在空出来的位置
+- 每个窗口的品种、周期各自独立,可随时用下拉菜单换品种;下次启动会按上次关闭时的窗口数、品种、周期恢复
+- 满 3 个窗口时点 ＋ 会在右上角提示"最多同时打开 3 个窗口"
+- 网页版(浏览器)点 ＋ 会弹出另一个小窗口,显示菜单里的下一个品种
+
 ## 操作
 
 - 顶部 `15m / 30m / 1h / 4h / 1d / 1w / 1M` 切换周期;「布林」勾选框开关布林线
 - 滚轮缩放,拖动平移,双击复位
 - 左上角默认显示最新一根蜡烛的开高低收(带「● 当前」),鼠标放在别的蜡烛上显示那一根
 - 鼠标放在 QQQ 数字上,提示当前时段(盘前 / 盘中 / 盘后)和最后更新时间;休市没人成交时数字会变淡
-- 网址后加 `?market=spot` 改看现货 QQQBUSDT;程序版命令行加 `--spot` 同理
-- 程序版会记住窗口位置和大小,存放在:Windows `%APPDATA%\qqqusdt-float\window.json`,Mac `~/Library/Application Support/qqqusdt-float/window.json`
+- 网址后加 `?market=spot` 改看现货 QQQBUSDT;程序版命令行加 `--spot` 同理(只影响 QQQ 这一项)
+- 网址后加 `?inst=eth`(或 `btc`、`qqq`)直接打开指定品种
+- 程序版会记住窗口位置和大小,存放在:Windows `%APPDATA%\qqqusdt-float\windows.json`,Mac `~/Library/Application Support/qqqusdt-float/windows.json`;同目录的 `app.log` 记录开关窗口和错误(旧版的 `window.json` 不再使用,可以删除)
 
 ## 数据从哪里来
 
@@ -44,15 +54,18 @@ codesign --force --deep --sign - QQQUSDT-Float.app
 |---|---|
 | 历史 K 线 | `https://fapi.binance.com/fapi/v1/klines`(币安 USDS-M 永续) |
 | 实时 K 线和最新价 | `wss://fstream.binance.com/market/stream`(注意是 `/market/stream`,旧的 `/ws`、`/stream` 能连上但收不到数据) |
+| OKX 历史 K 线 | `https://www.okx.com/api/v5/market/candles`(一次最多 300 根,用 `after` 往前翻页,取 600 根;日/周/月用 `1Dutc`/`1Wutc`/`1Mutc`,与币安一样按 UTC 切日) |
+| OKX 实时 K 线 | `wss://ws.okx.com/ws/v5/business`(订阅 `candle<周期>`,每 20 秒发一次 `ping` 保活;旧的 8443 端口 OKX 已通知将停用,所以用 443) |
 | QQQ 价格 | `wss://streamer.finance.yahoo.com/?version=2`(订阅 `QQQ`,消息是 base64 的 protobuf,页面里自己解码) |
 
-币安数据流 10 秒没数据会自动改成每 3 秒轮询历史接口,圆点变黄。你的网络必须能访问上面这些地址。
+币安或 OKX 的数据流 10 秒没数据会自动改成每 3 秒轮询历史接口,圆点变黄。你的网络必须能访问上面这些地址。**OKX 在中国大陆的网络上域名解析被污染,打不开**(开发时在大陆的两台服务器上实测都失败),在大陆使用需要自己的代理;海外网络直连即可。
 
 ## 已知限制
 
 - 周线和月线的历史很短(永续合约的 K 线从 2026 年 4 月开始,周线约 30 根、月线个位数),不足 20 根时布林线不会出现,月线基本看不到布林线。
 - Yahoo 推送只在有成交或报价时才发消息,休市时可能很久没有新价格,数字会变淡。
 - 夜盘(美东 20:00 到次日 04:00)Yahoo 是否推送夜盘价,开发时没有验证过。
+- OKX 页面不显示涨跌幅,只显示最新价(日线蜡烛可看当天涨跌)。
 - 没有价格提醒、没有开机自启,这是有意不做的。
 
 ## 开发和更新
@@ -68,7 +81,7 @@ app/main.py                程序版外壳(pywebview)
 ```
 pip install -r app/requirements.txt
 python app/main.py                         # 正常运行
-python app/main.py --selftest out.json     # 自检:打开窗口 12 秒,把页面读到的数字写进 out.json
+python app/main.py --selftest out.json     # 自检:开 3 个窗口、换品种、关一个再补一个,把页面读到的数字写进 out.json
 ```
 
 发布新版本(标签带项目前缀,只会构建这个项目):
