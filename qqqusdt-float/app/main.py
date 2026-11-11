@@ -205,7 +205,7 @@ class App:
 
 
 PROBE = ("JSON.stringify({title: document.title, inst: document.getElementById('inst').value,"
-         " qqq_shown: document.getElementById('qq').style.display !== 'none', qpx: document.getElementById('qpx').textContent,"
+         " qqq_shown: document.getElementById('qpx').style.display !== 'none', qpx: document.getElementById('qpx').textContent,"
          " px: document.getElementById('px').textContent, tf: document.querySelector('#tfs .on').textContent,"
          " bars: candles.length, bands: bands.filter(Boolean).length,"
          " dot: document.getElementById('dot').title, msg: document.getElementById('msg').textContent})")
