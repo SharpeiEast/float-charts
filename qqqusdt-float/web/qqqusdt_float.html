@@ -14,7 +14,7 @@
   .num.stale { opacity:0.45; }
   #hdr { gap:8px; }
   @media (max-width: 640px) { #hdr { gap:6px; font-size:12px; } button { padding:2px 5px; } .num { font-size:16px; } }
-  #dot { width:9px; height:9px; border-radius:50%; background:#777; flex:none; }
+  #dot, #ydot { width:9px; height:9px; border-radius:50%; background:#777; flex:none; }
   .sp { flex:1; }
   button { font:inherit; padding:2px 9px; border:1px solid var(--line); background:transparent; color:var(--fg); border-radius:5px; cursor:pointer; }
   button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
@@ -31,7 +31,7 @@
 <div id="app">
   <div id="hdr">
     <select id="inst" title="选择品种"></select>
-    <span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span>
+    <span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span><span id="ydot" title="Yahoo 推送状态"></span>
     <span id="px" class="num" title="最新价">--</span><span id="dot" title="连接状态"></span>
     <span class="sp"></span>
     <span id="tfs"></span>
@@ -85,7 +85,7 @@ function setInst(k) {
   if (!INSTS[k]) return;
   inst = k; store("inst", k); view.off = 0; candles = []; bands = []; ticker = null;
   $("inst").value = k;
-  $("qpx").style.display = k === "qqq" ? "" : "none";
+  $("qpx").style.display = $("ydot").style.display = k === "qqq" ? "" : "none";
   $("px").textContent = "--"; $("px").title = "币安 " + INSTS[k].short + " 最新价";
   document.title = INSTS[k].title;
   if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
@@ -360,17 +360,29 @@ function connectYahoo() {
   let w;
   try { w = new WebSocket("wss://streamer.finance.yahoo.com/?version=2"); } catch (e) { yRetry = setTimeout(connectYahoo, 5000); return; }
   yws = w;
-  w.onopen = () => { w.send(JSON.stringify({ subscribe: ["QQQ"] })); ySub = setInterval(() => { try { w.send(JSON.stringify({ subscribe: ["QQQ"] })); } catch (e) {} }, 60000); };
+  yStatus();
+  w.onopen = () => { yStatus(); w.send(JSON.stringify({ subscribe: ["QQQ"] })); ySub = setInterval(() => { try { w.send(JSON.stringify({ subscribe: ["QQQ"] })); } catch (e) {} }, 60000); };
   w.onmessage = ev => {
     let d; try { d = decodeYahoo(JSON.parse(ev.data).message); } catch (e) { return; }
     if (d[1] !== "QQQ" || typeof d[2] !== "number" || !(d[2] > 0)) return;
     qqq = { price: d[2], at: Date.now(), src: "ws", mh: d[7], tick: d[3] ? (d[3] % 2 === 0 ? d[3] / 2 : -(d[3] + 1) / 2) : Date.now() };
     showQqq();
   };
-  w.onclose = () => { clearInterval(ySub); yRetry = setTimeout(connectYahoo, 3000); };
+  w.onclose = () => { clearInterval(ySub); yStatus(); yRetry = setTimeout(connectYahoo, 3000); };
   w.onerror = () => {};
 }
+// light next to the QQQ price: green = quotes arriving; yellow = connected but silent (normal when the market is closed); red = disconnected; grey = connecting
+function yStatus() {
+  const d = $("ydot"), rs = yws ? yws.readyState : 3;
+  let col, tip;
+  if (rs === 0) { col = "#6a7683"; tip = "Yahoo: 正在连接…"; }
+  else if (rs !== 1) { col = "#e5534b"; tip = "Yahoo: 连接已断开, 正在重连…"; }
+  else if (qqq.price != null && Date.now() - qqq.at < 90000) { col = "#2ebd6b"; tip = "Yahoo: 推送正常"; }
+  else { col = "#e0a030"; tip = qqq.price == null ? "Yahoo: 已连接, 等待报价 (休市或无成交时正常)" : "Yahoo: 已连接, 但 " + Math.round((Date.now() - qqq.at) / 60000) + " 分钟没有新报价 (休市或无成交时正常)"; }
+  d.style.background = col; d.title = tip;
+}
 function showQqq() {
+  yStatus();
   const el = $("qpx");
   el.textContent = qqq.price == null ? "--" : fmt(qqq.price);
   // dim when nothing has arrived for a while (normal when the market is closed and nobody trades)
