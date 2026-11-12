@@ -38,6 +38,7 @@
   #tp .big { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; margin:2px 0 4px; }
   #tp .kv { display:flex; justify-content:space-between; margin:3px 0; } #tp .kv span:first-child { color:var(--muted); }
   #tp .warn { color:#e0a030; font-size:11px; min-height:14px; margin-top:4px; }
+  #tp .two + .two { margin-top:5px; }
   .up { color:var(--up); } .dn { color:var(--dn); }
   #msg { position:absolute; left:10px; bottom:26px; font-size:12px; color:var(--muted); pointer-events:none; }
 </style>
@@ -65,10 +66,13 @@
     <div id="tp-form">
       <div class="r"><span class="k">品种</span><select id="tpi" style="flex:1"></select></div>
       <div class="r"><span class="k">杠杆</span><input type="range" id="tplv" min="1" max="25" step="1" value="10"><input type="number" id="tplvn" min="1" max="25" step="1" value="10" style="flex:none;width:46px"><span>x</span></div>
+      <div class="two"><button id="tpmkt" class="on" title="按现价立即开仓">市价</button><button id="tplmt" title="设好价位, 价格到了才开仓">限价</button></div>
       <div class="two"><button id="tpbuy" class="buy on" title="Buy: 价格上涨赚钱">Buy 做多</button><button id="tpput" class="put" title="Put: 价格下跌赚钱">Put 做空</button></div>
+      <div class="r" id="tp-lr1" style="display:none"><span class="k">限价</span><input type="text" id="tplp" placeholder="到此价开仓" inputmode="decimal"><span class="hint" id="tplph"></span></div>
+      <div class="r" id="tp-lr2" style="display:none"><span class="k">有效期</span><input type="number" id="tpexp" min="1" max="1440" step="1" placeholder="默认30"><span>分钟</span></div>
       <div class="r"><span class="k">止盈价</span><input type="text" id="tptp" placeholder="可选" inputmode="decimal"><span class="hint" id="tptph"></span></div>
       <div class="r"><span class="k">止损价</span><input type="text" id="tpsl" placeholder="可选" inputmode="decimal"><span class="hint" id="tpslh"></span></div>
-      <div class="r"><label><input type="checkbox" id="tpfee" checked>含手续费 0.05%/边</label></div>
+      <div class="r"><label><input type="checkbox" id="tpfee" checked>含手续费 (吃单0.05% 挂单0.02%)</label></div>
       <button id="tpgo" class="go">开仓 (按现价)</button>
       <div class="warn" id="tpwarn"></div>
     </div>
@@ -82,6 +86,17 @@
       <div class="r"><span class="k">止损价</span><input type="text" id="tpsl2" placeholder="无" inputmode="decimal"></div>
       <div class="warn" id="tpwarn2"></div>
       <button id="tpend" class="go stop">平仓</button>
+    </div>
+    <div id="tp-ord" style="display:none">
+      <div class="kv"><span id="tpodesc"></span></div>
+      <div class="kv"><span>委托倒计时</span><span id="tpocd"></span></div>
+      <div class="big" id="tpobig">--</div>
+      <div class="kv"><span>限价</span><span id="tpoprice"></span></div>
+      <div class="kv"><span>现价</span><span id="tpopx"></span></div>
+      <div class="kv"><span>距离</span><span id="tpodist"></span></div>
+      <div class="kv"><span>止盈 / 止损</span><span id="tpotpsl"></span></div>
+      <div class="warn" id="tpowarn"></div>
+      <button id="tpocancel" class="go stop">撤单</button>
     </div>
     <div id="tp-sum" style="display:none">
       <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
@@ -485,13 +500,15 @@ if (Q.has("diag")) document.title += "  [secure=" + window.isSecureContext + " p
 // ROE (return on margin) = side * leverage * (price / entry - 1), minus taker fees on the notional at both ends (optional).
 // Liquidation: margin + PnL - open fee <= maintenance margin (notional * MMR). MMR below: BTC/ETH = Binance first tier; QQQ is an assumed value.
 const TR = { qqq: { max: 25, mmr: 0.02 }, eth: { max: 150, mmr: 0.004 }, btc: { max: 150, mmr: 0.004 } };
-const TAKER = 0.0005;
+const TAKER = 0.0005, MAKER = 0.0002, DEF_EXP = 30;
+let ord = null, tMode = "mkt";
 let pos = null, tOpen = false, tSide = 1, tInst = inst, feed = { ws: null, sym: null, price: null, at: 0, poll: null };
 Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INSTS[k].label; $("tpi").appendChild(o); });
 const pnum = el => { const v = parseFloat(String(el.value).replace(/,/g, "")); return v > 0 ? v : null; };
 const pc = (v, d) => (v >= 0 ? "+" : "") + (v * 100).toFixed(d == null ? 2 : d) + "%";
-const roeAt = (p, q) => { const r = p / q.entry; let v = q.side * q.lev * (r - 1); if (q.fee) v -= q.lev * TAKER * (1 + r); return v; };
-const liqOf = q => { const m = TR[q.inst].mmr, f0 = q.fee ? q.lev * TAKER : 0; return q.entry * (q.side * q.lev - 1 + f0) / (q.lev * (q.side - m)); };
+const foOf = q => q.fo != null ? q.fo : TAKER;                 // fee rate of the opening fill (maker for a limit fill, taker otherwise); closing is always taker
+const roeAt = (p, q) => { const r = p / q.entry; let v = q.side * q.lev * (r - 1); if (q.fee) v -= q.lev * (foOf(q) + TAKER * r); return v; };
+const liqOf = q => { const m = TR[q.inst].mmr, f0 = q.fee ? q.lev * foOf(q) : 0; return q.entry * (q.side * q.lev - 1 + f0) / (q.lev * (q.side - m)); };
 const dur = ms => { const s = Math.round(ms / 1000); return s < 3600 ? Math.floor(s / 60) + "分" + pad2(s % 60) + "秒" : Math.floor(s / 3600) + "小时" + pad2(Math.floor(s % 3600 / 60)) + "分"; };
 const sideName = s => s > 0 ? "Buy 做多" : "Put 做空";
 
@@ -536,24 +553,35 @@ function updateTrade() {
     const b = $("tbtn"); b.textContent = "SIMU " + pc(roe, 1); b.className = roe >= 0 ? "pos" : "neg";
     scheduleRender();
   }
-  if (!pos) hints();
+  if (ord && p != null) checkOrder(p);
+  if (!pos && !ord) hints();
 }
 function hints() {
-  const p = feed.price; if (p == null) return;
-  const q = { inst: tInst, side: tSide, lev: +$("tplvn").value || 1, entry: p, fee: $("tpfee").checked };
+  const cur = feed.price; if (cur == null) return;
+  let p = cur, fo = TAKER;
+  const lp = pnum($("tplp"));
+  if (tMode === "lmt") {
+    const h = $("tplph");
+    if (lp) { const k = kindOf(tSide, lp, cur); p = lp; fo = k === "limit" ? MAKER : TAKER; h.textContent = (lp > cur ? "+" : "") + ((lp / cur - 1) * 100).toFixed(2) + "%" + (k === "stop" ? " 突破" : ""); h.className = "hint"; }
+    else { h.textContent = ""; }
+  }
+  const q = { inst: tInst, side: tSide, lev: +$("tplvn").value || 1, entry: p, fee: $("tpfee").checked, fo };
   const one = (el, hint, kind) => {
     const v = pnum(el); const h = $(hint);
     if (!v) { h.textContent = ""; h.className = "hint"; return; }
     const ok = kind === "tp" ? (tSide > 0 ? v > p : v < p) : (tSide > 0 ? v < p : v > p);
-    if (!ok) { h.textContent = tSide > 0 === (kind === "tp") ? "须高于现价" : "须低于现价"; h.className = "hint dn"; return; }
+    if (!ok) { h.textContent = (tSide > 0 === (kind === "tp") ? "须高于" : "须低于") + (tMode === "lmt" ? "限价" : "现价"); h.className = "hint dn"; return; }
     const r = roeAt(v, q); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up" : "dn");
   };
   one($("tptp"), "tptph", "tp"); one($("tpsl"), "tpslh", "sl");
-  const lq = liqOf(q); $("tpwarn").textContent = "爆仓价约 " + fmt(lq, p >= 1000 ? 1 : 2) + (q.lev >= 100 ? "  (高杠杆极易爆仓)" : "");
+  const lq = liqOf(q); $("tpwarn").textContent = (tMode === "lmt" && lp ? "成交后" : "") + "爆仓价约 " + fmt(lq, p >= 1000 ? 1 : 2) + (q.lev >= 100 ? "  (高杠杆极易爆仓)" : "");
 }
 function showView(v) {
-  $("tp-form").style.display = v === "form" ? "" : "none"; $("tp-pos").style.display = v === "pos" ? "" : "none"; $("tp-sum").style.display = v === "sum" ? "" : "none";
+  $("tp-form").style.display = v === "form" ? "" : "none"; $("tp-pos").style.display = v === "pos" ? "" : "none"; $("tp-sum").style.display = v === "sum" ? "" : "none"; $("tp-ord").style.display = v === "ord" ? "" : "none";
 }
+// where a limit price sits relative to the market: "limit" = resting order on the better side (fills at the limit price, maker),
+// "stop" = price must first run through the level (fills at the tick that reaches it, taker), "now" = exactly at the market
+const kindOf = (side, lim, cur) => lim === cur ? "now" : ((side > 0) === (lim < cur) ? "limit" : "stop");
 function clampLev() {
   const mx = TR[tInst].max; $("tplv").max = mx; $("tplvn").max = mx;
   let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v;
@@ -564,8 +592,8 @@ function setTrade(open) {
   tOpen = open; $("tp").classList.toggle("open", open);
   if (open !== was) { try { if (window.pywebview && pywebview.api && pywebview.api.set_panel) pywebview.api.set_panel(open, PANEL_W); } catch (e) {} }
   setTimeout(render, 30);
-  if (open) { if (!pos) { tInst = inst; $("tpi").value = tInst; clampLev(); } feedStart(pos ? pos.inst : tInst); updateTrade(); }
-  else if (!pos) feedStop();
+  if (open) { if (!pos && !ord) { tInst = inst; $("tpi").value = tInst; clampLev(); } feedStart(pos ? pos.inst : ord ? ord.inst : tInst); updateTrade(); }
+  else if (!pos && !ord) feedStop();
 }
 $("tbtn").onclick = () => setTrade(!tOpen);
 $("tpx").onclick = () => setTrade(false);
@@ -575,21 +603,85 @@ $("tplvn").oninput = () => { if ($("tplvn").value !== "") { clampLev(); hints();
 $("tplvn").onchange = () => { clampLev(); hints(); };
 $("tpbuy").onclick = () => { tSide = 1; $("tpbuy").classList.add("on"); $("tpput").classList.remove("on"); hints(); };
 $("tpput").onclick = () => { tSide = -1; $("tpput").classList.add("on"); $("tpbuy").classList.remove("on"); hints(); };
-["tptp", "tpsl", "tpfee"].forEach(id => $(id).addEventListener("input", hints));
+["tptp", "tpsl", "tpfee", "tplp"].forEach(id => $(id).addEventListener("input", hints));
+function setMode(m) {
+  tMode = m; $("tpmkt").classList.toggle("on", m === "mkt"); $("tplmt").classList.toggle("on", m === "lmt");
+  $("tp-lr1").style.display = $("tp-lr2").style.display = m === "lmt" ? "" : "none";
+  $("tpgo").textContent = m === "lmt" ? "挂单 (到价开仓)" : "开仓 (按现价)";
+  if (m === "lmt" && !$("tplp").value && feed.price != null) $("tplp").placeholder = "现价 " + fmt(feed.price, feed.price >= 1000 ? 1 : 2);
+  hints();
+}
+$("tpmkt").onclick = () => setMode("mkt");
+$("tplmt").onclick = () => setMode("lmt");
 
-$("tpgo").onclick = () => {
-  if (!fresh()) { $("tpwarn").textContent = "还没有收到最新行情, 请稍等"; return; }
-  const p = feed.price, tp = pnum($("tptp")), sl = pnum($("tpsl"));
-  if (tp && (tSide > 0 ? tp <= p : tp >= p)) { $("tpwarn").textContent = "止盈价设置不合理"; return; }
-  if (sl && (tSide > 0 ? sl >= p : sl <= p)) { $("tpwarn").textContent = "止损价设置不合理"; return; }
-  pos = { inst: tInst, side: tSide, lev: Math.max(1, Math.min(TR[tInst].max, Math.round(+$("tplvn").value || 1))), entry: p, tp, sl, fee: $("tpfee").checked, t0: Date.now(), hi: -Infinity, lo: Infinity, last: p };
+function startPos(o, entry, fo, how) {
+  pos = { inst: o.inst, side: o.side, lev: o.lev, entry, tp: o.tp, sl: o.sl, fee: o.fee, fo, how, t0: Date.now(), hi: -Infinity, lo: Infinity, last: entry };
   pos.liq = liqOf(pos);
-  const d = p >= 1000 ? 1 : 2;
+  const d = entry >= 1000 ? 1 : 2;
   $("tpdesc").textContent = INSTS[pos.inst].label + " " + sideName(pos.side) + " " + pos.lev + "x";
-  $("tpent").textContent = fmt(p, d); $("tpliq").textContent = fmt(pos.liq, d);
-  $("tptp2").value = tp ? tp : ""; $("tpsl2").value = sl ? sl : ""; $("tpwarn2").textContent = "";
+  $("tpent").textContent = fmt(entry, d); $("tpliq").textContent = fmt(pos.liq, d);
+  $("tptp2").value = o.tp ? o.tp : ""; $("tpsl2").value = o.sl ? o.sl : ""; $("tpwarn2").textContent = "";
   warnLiq();
   showView("pos"); updateTrade();
+}
+$("tpgo").onclick = () => {
+  if (!fresh()) { $("tpwarn").textContent = "还没有收到最新行情, 请稍等"; return; }
+  const cur = feed.price, tp = pnum($("tptp")), sl = pnum($("tpsl"));
+  const lev = Math.max(1, Math.min(TR[tInst].max, Math.round(+$("tplvn").value || 1)));
+  const base = { inst: tInst, side: tSide, lev, tp, sl, fee: $("tpfee").checked };
+  if (tMode === "mkt") {
+    if (tp && (tSide > 0 ? tp <= cur : tp >= cur)) { $("tpwarn").textContent = "止盈价设置不合理"; return; }
+    if (sl && (tSide > 0 ? sl >= cur : sl <= cur)) { $("tpwarn").textContent = "止损价设置不合理"; return; }
+    startPos(base, cur, TAKER, "市价");
+    return;
+  }
+  // limit order: wait for the price to reach the level, give up after the countdown
+  const lp = pnum($("tplp"));
+  if (!lp) { $("tpwarn").textContent = "请填写限价"; return; }
+  let mins = DEF_EXP;
+  if ($("tpexp").value.trim() !== "") { mins = Number($("tpexp").value); if (!(mins >= 1 && mins <= 1440)) { $("tpwarn").textContent = "有效期需在 1 到 1440 分钟之间"; return; } }
+  if (tp && (tSide > 0 ? tp <= lp : tp >= lp)) { $("tpwarn").textContent = "止盈价设置不合理 (相对限价)"; return; }
+  if (sl && (tSide > 0 ? sl >= lp : sl <= lp)) { $("tpwarn").textContent = "止损价设置不合理 (相对限价)"; return; }
+  ord = Object.assign(base, { price: lp, kind: kindOf(tSide, lp, cur), cur0: cur, mins, t0: Date.now(), expAt: Date.now() + mins * 60000 });
+  const d = lp >= 1000 ? 1 : 2;
+  $("tpodesc").textContent = INSTS[ord.inst].label + " " + sideName(ord.side) + " " + ord.lev + "x";
+  $("tpoprice").textContent = fmt(lp, d) + (ord.kind === "stop" ? " (突破开仓)" : ord.kind === "limit" ? " (回落/反弹到此价)" : "");
+  $("tpotpsl").textContent = (tp ? fmt(tp, d) : "无") + " / " + (sl ? fmt(sl, d) : "无");
+  $("tpowarn").textContent = "有效期 " + mins + " 分钟, 超时自动撤单";
+  showView("ord"); orderUI(); updateTrade(); scheduleRender();
+};
+// pending order: reached -> becomes a position; countdown over -> cancelled
+function checkOrder(p) {
+  if (!ord) return;
+  const hit = ord.kind === "now" || (ord.side > 0 ? (ord.kind === "limit" ? p <= ord.price : p >= ord.price) : (ord.kind === "limit" ? p >= ord.price : p <= ord.price));
+  if (!hit) return;
+  const o = ord; ord = null;
+  const maker = o.kind === "limit";
+  const entry = maker ? o.price : p;
+  const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
+  toast("限价单已成交 " + fmt(entry, entry >= 1000 ? 1 : 2));
+  startPos(o, entry, maker ? MAKER : TAKER, maker ? "限价成交" : "突破成交");
+}
+function orderUI() {
+  if (!ord) return;
+  if (Date.now() >= ord.expAt) {
+    const o = ord; ord = null;
+    const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
+    showView("form"); $("tpwarn").textContent = "限价委托已超时撤销: " + o.mins + " 分钟内价格没有到 " + fmt(o.price, o.price >= 1000 ? 1 : 2);
+    toast("限价委托已超时撤销"); if (!pos && !tOpen) feedStop(); scheduleRender();
+    return;
+  }
+  const left = Math.max(0, Math.round((ord.expAt - Date.now()) / 1000)), mm = pad2(Math.floor(left / 60)) + ":" + pad2(left % 60);
+  $("tpobig").textContent = mm; $("tpocd").textContent = "共 " + ord.mins + " 分钟";
+  const p = feed.price, d = ord.price >= 1000 ? 1 : 2;
+  if (p != null) { $("tpopx").textContent = fmt(p, d); const dist = (ord.price / p - 1) * 100; $("tpodist").textContent = (dist >= 0 ? "+" : "") + dist.toFixed(2) + "%"; }
+  const b = $("tbtn"); b.textContent = "SIMU " + mm; b.className = "";
+}
+setInterval(() => { if (ord) orderUI(); }, 1000);
+$("tpocancel").onclick = () => {
+  if (!ord) return;
+  ord = null; const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
+  showView("form"); $("tpwarn").textContent = "已撤单"; if (!pos && !tOpen) feedStop(); scheduleRender();
 };
 function warnLiq() {
   if (!pos) return;
@@ -613,12 +705,12 @@ function closePos(why, px) {
   const liq = why === "爆仓";
   const roe = liq ? -1 : roeAt(px, q);
   const move = q.side * (px / q.entry - 1);
-  const fees = liq || !q.fee ? 0 : -q.lev * TAKER * (1 + px / q.entry);
+  const fees = liq || !q.fee ? 0 : -q.lev * (foOf(q) + TAKER * px / q.entry);
   const d = q.entry >= 1000 ? 1 : 2, row = (a, b) => '<div class="kv"><span>' + a + "</span><span>" + b + "</span></div>";
   $("sumwhy").textContent = why;
   const e = $("sumroe"); e.textContent = pc(roe); e.className = "big " + (roe >= 0 ? "up" : "dn");
   $("sumrows").innerHTML =
-    row("品种 / 方向", INSTS[q.inst].label + " · " + sideName(q.side)) + row("杠杆", q.lev + "x") +
+    row("品种 / 方向", INSTS[q.inst].label + " · " + sideName(q.side)) + row("杠杆", q.lev + "x") + row("开仓方式", q.how || "市价") +
     row("开仓价", fmt(q.entry, d)) + row("平仓价", fmt(px, d)) +
     row("价格变动 (按方向)", '<span class="' + (move >= 0 ? "up" : "dn") + '">' + pc(move, 3) + "</span>") +
     row("本金收益率", '<span class="' + (roe >= 0 ? "up" : "dn") + '">' + pc(roe) + (q.fee ? " (含手续费)" : "") + "</span>") +
@@ -632,9 +724,11 @@ function closePos(why, px) {
 $("sumok").onclick = () => { $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); };
 
 function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
-  if (!pos || pos.inst !== inst) return;
-  const d = pos.entry >= 1000 ? 1 : 2;
-  const items = [["入场", pos.entry, FG, [6, 3]], ["止盈", pos.tp, UP, [2, 3]], ["止损", pos.sl, DN, [2, 3]], ["爆仓", pos.liq, "#e0a030", [1, 3]]];
+  const o = pos && pos.inst === inst ? pos : null, w = !pos && ord && ord.inst === inst ? ord : null;
+  if (!o && !w) return;
+  const d = (o ? o.entry : w.price) >= 1000 ? 1 : 2;
+  const items = o ? [["入场", o.entry, FG, [6, 3]], ["止盈", o.tp, UP, [2, 3]], ["止损", o.sl, DN, [2, 3]], ["爆仓", o.liq, "#e0a030", [1, 3]]]
+                  : [["挂单", w.price, "#5b8cff", [6, 3]], ["止盈", w.tp, UP, [2, 3]], ["止损", w.sl, DN, [2, 3]]];
   ctx.textAlign = "right"; ctx.textBaseline = "bottom";
   for (const [name, v, col, dash] of items) {
     if (v == null) continue;
