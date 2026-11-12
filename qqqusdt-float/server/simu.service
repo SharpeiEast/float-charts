@@ -1,0 +1,13 @@
+[Unit]
+Description=SIMU simulated contract server
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/simu/simu_server.py --host <TAILSCALE-IP> --host 127.0.0.1 --port 8765 --state %h/simu/state.json --html %h/simu/qqqusdt_float.html
+Restart=always
+RestartSec=3
+StandardOutput=append:%h/simu/server.log
+StandardError=append:%h/simu/server.log
+
+[Install]
+WantedBy=default.target

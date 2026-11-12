@@ -62,7 +62,8 @@
   </div>
   </div>
   <div id="tp">
-    <div class="h"><b>模拟合约</b><span class="sp"></span><span id="tppx" class="lb"></span><button id="tpx" title="收起">✕</button></div>
+    <div class="h"><b>模拟合约</b><span class="sp"></span><span id="tppx" class="lb"></span><button id="tpcfg" title="服务器设置">⚙</button><button id="tpx" title="收起">✕</button></div>
+    <div class="hint" id="tpsrv" style="text-align:left;margin:-2px 0 4px 0"></div>
     <div id="tp-form">
       <div class="r"><span class="k">品种</span><select id="tpi" style="flex:1"></select></div>
       <div class="r"><span class="k">杠杆</span><input type="range" id="tplv" min="1" max="25" step="1" value="10"><input type="number" id="tplvn" min="1" max="25" step="1" value="10" style="flex:none;width:46px"><span>x</span></div>
@@ -101,6 +102,15 @@
       <div class="hint" style="text-align:left;margin:-2px 0 2px 0">修改后按回车或点别处生效; 改倒计时 = 从现在起重新计时</div>
       <div class="warn" id="tpowarn"></div>
       <button id="tpocancel" class="go stop">撤单</button>
+    </div>
+    <div id="tp-set" style="display:none">
+      <div class="kv"><b>服务器设置</b></div>
+      <div class="hint" style="text-align:left;margin:2px 0 6px 0">填了服务器, 挂单和持仓就由服务器看着价格自动成交/止盈/止损/爆仓, 电脑关机也照常运行。留空 = 本地模式(关掉软件就停)。</div>
+      <div class="r"><span class="k">地址</span><input type="text" id="tpsurl" placeholder="http://100.78.175.68:8765" autocapitalize="off" spellcheck="false"></div>
+      <div class="r"><span class="k">口令</span><input type="text" id="tpstok" placeholder="访问口令" autocapitalize="off" spellcheck="false"></div>
+      <button id="tpsok" class="go">保存并连接</button>
+      <button id="tpsback" class="go" style="border-color:var(--line)">返回</button>
+      <div class="warn" id="tpswarn"></div>
     </div>
     <div id="tp-sum" style="display:none">
       <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
@@ -516,9 +526,82 @@ const liqOf = q => { const m = TR[q.inst].mmr, f0 = q.fee ? q.lev * foOf(q) : 0;
 const dur = ms => { const s = Math.round(ms / 1000); return s < 3600 ? Math.floor(s / 60) + "分" + pad2(s % 60) + "秒" : Math.floor(s / 3600) + "小时" + pad2(Math.floor(s % 3600 / 60)) + "分"; };
 const sideName = s => s > 0 ? "Buy 做多" : "Put 做空";
 
-function feedStop() { clearInterval(feed.poll); if (feed.ws) { feed.ws.onmessage = feed.ws.onclose = feed.ws.onerror = null; try { feed.ws.close(); } catch (e) {} } feed = { ws: null, sym: null, price: null, at: 0, poll: null }; }
+// ---------- server mode: orders / positions live on an always-on server (simu_server.py), this page only shows and edits them ----------
+const SERVED = !!document.querySelector('meta[name="simu-served"]');
+let SRV = null, skew = 0, srvBusy = false, srvOk = null, srvSeen = null;
+(function () {
+  if (Q.get("srv")) { store("srv", Q.get("srv")); store("tok", Q.get("tok") || ""); }
+  else if (Q.get("tok")) store("tok", Q.get("tok"));
+  let u = Q.get("srv") || store("srv") || (SERVED ? location.origin : "");
+  if (Q.get("local") != null) u = "";
+  if (u) SRV = { url: u.replace(/\/+$/, ""), tok: Q.get("tok") || store("tok") || "" };
+})();
+async function api(method, path, body) {
+  const r = await fetch(SRV.url + path, { method, headers: { "X-Token": SRV.tok, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  if (!r.ok) { const er = new Error(j.error || ("HTTP " + r.status)); er.http = r.status; throw er; }
+  return j;
+}
+const watchInst = () => pos ? pos.inst : ord ? ord.inst : (tOpen ? tInst : inst);
+function srvLabel() {
+  const e = $("tpsrv");
+  if (!SRV) e.textContent = "本地模式: 关掉软件, 挂单和持仓就停了";
+  else if (srvOk === null) e.textContent = "服务器: 连接中…";
+  else if (srvOk) e.textContent = "服务器: 已连接, 关机也照常运行";
+  else e.textContent = "服务器: 连不上" + (srvOk === 401 ? " (口令不对)" : "") + ", 显示的可能不是最新";
+  e.style.color = SRV && srvOk !== null && srvOk !== true ? "var(--dn)" : "";
+}
+async function srvSync() {
+  if (!SRV || srvBusy) return;
+  srvBusy = true;
+  try { srvApply(await api("GET", "/api/state?inst=" + watchInst())); srvOk = true; }
+  catch (e) { srvOk = e.http || false; }
+  finally { srvBusy = false; srvLabel(); }
+}
+const sameJ = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const typing = id => document.activeElement === $(id);
+function srvApply(st) {
+  skew = st.now - Date.now();
+  const sym = INSTS[watchInst()].sym, pr = st.prices[sym];
+  feed.sym = sym;
+  if (pr) { feed.price = pr.p; feed.at = Date.now() - Math.max(0, st.now - pr.t); }
+  const np = st.pos, op = pos;
+  pos = np ? Object.assign({}, np, { last: feed.price != null ? feed.price : np.last }) : null;
+  if (np) {
+    if (!op || op.id !== np.id) posUI();
+    else {
+      if (!typing("tptp2")) $("tptp2").value = np.tp ? np.tp : "";
+      if (!typing("tpsl2")) $("tpsl2").value = np.sl ? np.sl : "";
+      warnLiq();
+    }
+  }
+  const oo = ord;
+  ord = st.ord ? Object.assign({}, st.ord) : null;
+  if (ord && !pos && (!oo || oo.id !== ord.id)) { syncOrd(); ordInfo(); }
+  else if (ord && oo && !sameJ(oo, ord) && !["tpoprice", "tpolev", "tpotp", "tposl", "tpomin"].some(typing)) { syncOrd(); ordInfo(); }
+  const sm = st.sums[0];
+  if (sm) {
+    const key = sm.at + ":" + sm.why;
+    if (srvSeen !== key) { srvSeen = key; renderSummary(sm); }
+  } else {
+    srvSeen = null;
+    if (pos) { if (curView !== "pos") showView("pos"); }
+    else if (ord) { if (curView !== "ord") { showView("ord"); } }
+    else if (curView === "pos" || curView === "ord" || curView === "sum") showView("form");
+  }
+  if (!pos && !ord) { const b = $("tbtn"); if (!sm) { b.textContent = "SIMU"; b.className = ""; } }
+  orderUI(); updateTrade(); scheduleRender();
+}
+async function srvDo(path, body, onErr) {
+  try { const st = await api("POST", path, body); srvOk = true; srvApply(st); srvLabel(); return true; }
+  catch (e) { if (e.http == null) { srvOk = false; srvLabel(); } (onErr || (m => { $("tpwarn").textContent = m; }))(e.http == null ? "服务器连不上" : e.message); srvSync(); return false; }
+}
+setInterval(srvSync, 1500);
+
+function feedStop() { if (SRV) return; clearInterval(feed.poll); if (feed.ws) { feed.ws.onmessage = feed.ws.onclose = feed.ws.onerror = null; try { feed.ws.close(); } catch (e) {} } feed = { ws: null, sym: null, price: null, at: 0, poll: null }; }
 function feedStart(k) {
   const sym = INSTS[k].sym;
+  if (SRV) { feed.sym = sym; srvSync(); return; }
   if (feed.sym === sym && (feed.ws || MOCK)) return;
   feedStop(); feed.sym = sym;
   if (MOCK) { const c = candles[candles.length - 1]; feed.price = c ? c.c : 100; feed.at = Date.now() + 1e12; updateTrade(); return; }
@@ -548,16 +631,18 @@ function updateTrade() {
     pos.last = p;
     const roe = roeAt(p, pos);
     pos.hi = Math.max(pos.hi, roe); pos.lo = Math.min(pos.lo, roe);
-    const hitLiq = pos.side > 0 ? p <= pos.liq : p >= pos.liq;
-    if (hitLiq) { closePos("爆仓", p); return; }
-    if (pos.tp != null && (pos.side > 0 ? p >= pos.tp : p <= pos.tp)) { closePos("触发止盈", p); return; }
-    if (pos.sl != null && (pos.side > 0 ? p <= pos.sl : p >= pos.sl)) { closePos("触发止损", p); return; }
+    if (!SRV) {
+      const hitLiq = pos.side > 0 ? p <= pos.liq : p >= pos.liq;
+      if (hitLiq) { closePos("爆仓", p); return; }
+      if (pos.tp != null && (pos.side > 0 ? p >= pos.tp : p <= pos.tp)) { closePos("触发止盈", p); return; }
+      if (pos.sl != null && (pos.side > 0 ? p <= pos.sl : p >= pos.sl)) { closePos("触发止损", p); return; }
+    }
     const e = $("tproe"); e.textContent = pc(roe); e.className = "big " + (roe >= 0 ? "up" : "dn");
-    $("tpnow").textContent = fmt(p, d); $("tpdur").textContent = dur(Date.now() - pos.t0);
+    $("tpnow").textContent = fmt(p, d); $("tpdur").textContent = dur(Date.now() + skew - pos.t0);
     const b = $("tbtn"); b.textContent = "SIMU " + pc(roe, 1); b.className = roe >= 0 ? "pos" : "neg";
     scheduleRender();
   }
-  if (ord && p != null) checkOrder(p);
+  if (ord && p != null && !SRV) checkOrder(p);
   if (!pos && !ord) hints();
 }
 function hints() {
@@ -580,8 +665,9 @@ function hints() {
   one($("tptp"), "tptph", "tp"); one($("tpsl"), "tpslh", "sl");
   const lq = liqOf(q); $("tpwarn").textContent = (tMode === "lmt" && lp ? "成交后" : "") + "爆仓价约 " + fmt(lq, p >= 1000 ? 1 : 2) + (q.lev >= 100 ? "  (高杠杆极易爆仓)" : "");
 }
+let curView = "form";
 function showView(v) {
-  $("tp-form").style.display = v === "form" ? "" : "none"; $("tp-pos").style.display = v === "pos" ? "" : "none"; $("tp-sum").style.display = v === "sum" ? "" : "none"; $("tp-ord").style.display = v === "ord" ? "" : "none";
+  $("tp-form").style.display = v === "form" ? "" : "none"; $("tp-pos").style.display = v === "pos" ? "" : "none"; $("tp-sum").style.display = v === "sum" ? "" : "none"; $("tp-ord").style.display = v === "ord" ? "" : "none"; $("tp-set").style.display = v === "set" ? "" : "none"; curView = v;
 }
 // where a limit price sits relative to the market: "limit" = resting order on the better side (fills at the limit price, maker),
 // "stop" = price must first run through the level (fills at the tick that reaches it, taker), "now" = exactly at the market
@@ -621,7 +707,10 @@ $("tplmt").onclick = () => setMode("lmt");
 function startPos(o, entry, fo, how) {
   pos = { inst: o.inst, side: o.side, lev: o.lev, entry, tp: o.tp, sl: o.sl, fee: o.fee, fo, how, t0: Date.now(), hi: -Infinity, lo: Infinity, last: entry };
   pos.liq = liqOf(pos);
-  const d = entry >= 1000 ? 1 : 2;
+  posUI();
+}
+function posUI() {
+  const entry = pos.entry, o = pos, d = entry >= 1000 ? 1 : 2;
   $("tpdesc").textContent = INSTS[pos.inst].label + " " + sideName(pos.side) + " " + pos.lev + "x";
   $("tpent").textContent = fmt(entry, d); $("tpliq").textContent = fmt(pos.liq, d);
   $("tptp2").value = o.tp ? o.tp : ""; $("tpsl2").value = o.sl ? o.sl : ""; $("tpwarn2").textContent = "";
@@ -636,6 +725,7 @@ $("tpgo").onclick = () => {
   if (tMode === "mkt") {
     if (tp && (tSide > 0 ? tp <= cur : tp >= cur)) { $("tpwarn").textContent = "止盈价设置不合理"; return; }
     if (sl && (tSide > 0 ? sl >= cur : sl <= cur)) { $("tpwarn").textContent = "止损价设置不合理"; return; }
+    if (SRV) { srvDo("/api/order", Object.assign({ mode: "mkt" }, base)); return; }
     startPos(base, cur, TAKER, "市价");
     return;
   }
@@ -646,6 +736,7 @@ $("tpgo").onclick = () => {
   if ($("tpexp").value.trim() !== "") { mins = Number($("tpexp").value); if (!(mins >= 1 && mins <= 1440)) { $("tpwarn").textContent = "有效期需在 1 到 1440 分钟之间"; return; } }
   if (tp && (tSide > 0 ? tp <= lp : tp >= lp)) { $("tpwarn").textContent = "止盈价设置不合理 (相对限价)"; return; }
   if (sl && (tSide > 0 ? sl >= lp : sl <= lp)) { $("tpwarn").textContent = "止损价设置不合理 (相对限价)"; return; }
+  if (SRV) { srvDo("/api/order", Object.assign({ mode: "lmt", price: lp, mins }, base)); return; }
   ord = Object.assign(base, { price: lp, kind: kindOf(tSide, lp, cur), cur0: cur, mins, t0: Date.now(), expAt: Date.now() + mins * 60000 });
   const d = lp >= 1000 ? 1 : 2;
   $("tpodesc").textContent = INSTS[ord.inst].label + " " + sideName(ord.side) + " " + ord.lev + "x";
@@ -666,14 +757,14 @@ function checkOrder(p) {
 }
 function orderUI() {
   if (!ord) return;
-  if (Date.now() >= ord.expAt) {
+  if (!SRV && Date.now() >= ord.expAt) {
     const o = ord; ord = null;
     const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
     showView("form"); $("tpwarn").textContent = "限价委托已超时撤销: " + o.mins + " 分钟内价格没有到 " + fmt(o.price, o.price >= 1000 ? 1 : 2);
     toast("限价委托已超时撤销"); if (!pos && !tOpen) feedStop(); scheduleRender();
     return;
   }
-  const left = Math.max(0, Math.round((ord.expAt - Date.now()) / 1000)), mm = pad2(Math.floor(left / 60)) + ":" + pad2(left % 60);
+  const left = Math.max(0, Math.round((ord.expAt - Date.now() - skew) / 1000)), mm = pad2(Math.floor(left / 60)) + ":" + pad2(left % 60);
   $("tpobig").textContent = mm; $("tpocd").textContent = "共 " + ord.mins + " 分钟";
   const p = feed.price, d = ord.price >= 1000 ? 1 : 2;
   if (p != null) { $("tpopx").textContent = fmt(p, d); const dist = (ord.price / p - 1) * 100; $("tpodist").textContent = (dist >= 0 ? "+" : "") + dist.toFixed(2) + "%"; }
@@ -697,6 +788,7 @@ $("tpoprice").onchange = () => {
   if (!ord) return;
   const v = pnum($("tpoprice")); if (!v) return ordBad("限价无效");
   const o = ord;
+  if (SRV) return srvDo("/api/order/edit", { price: v }, ordBad);
   if (o.tp && (o.side > 0 ? o.tp <= v : o.tp >= v)) return ordBad("新限价与止盈价冲突, 请先改止盈价");
   if (o.sl && (o.side > 0 ? o.sl >= v : o.sl <= v)) return ordBad("新限价与止损价冲突, 请先改止损价");
   o.price = v; if (feed.price != null) o.kind = kindOf(o.side, v, feed.price);
@@ -706,11 +798,13 @@ $("tpolev").onchange = () => {
   if (!ord) return;
   const mx = TR[ord.inst].max, v = Math.round(Number($("tpolev").value));
   if (!(v >= 1)) return ordBad("杠杆至少 1 倍");
+  if (SRV) return srvDo("/api/order/edit", { lev: v }, m => ordBad(m));
   ord.lev = Math.min(mx, v); syncOrd(); ordInfo(v > mx ? "最大杠杆 " + mx + "x, 已改为 " + mx + "x" : undefined);
 };
 const editOrdLevel = which => {
   if (!ord) return;
   const el = which === "tp" ? $("tpotp") : $("tposl"), v = pnum(el);
+  if (SRV) return srvDo("/api/order/edit", { [which]: el.value.trim() === "" ? null : el.value }, ordBad);
   if (el.value.trim() === "") { ord[which] = null; syncOrd(); ordInfo(); scheduleRender(); return; }
   const ok = v && (which === "tp" ? (ord.side > 0 ? v > ord.price : v < ord.price) : (ord.side > 0 ? v < ord.price : v > ord.price));
   if (!ok) return ordBad((which === "tp" ? "止盈" : "止损") + "价需在限价" + ((which === "tp") === (ord.side > 0) ? "上方" : "下方"));
@@ -721,10 +815,12 @@ $("tposl").onchange = () => editOrdLevel("sl");
 $("tpomin").onchange = () => {
   if (!ord) return;
   const m = Number($("tpomin").value); if (!(m >= 1 && m <= 1440)) return ordBad("倒计时需在 1 到 1440 分钟之间");
+  if (SRV) return srvDo("/api/order/edit", { mins: m }, ordBad);
   ord.mins = m; ord.expAt = Date.now() + m * 60000; syncOrd(); ordInfo(); orderUI();
 };
 $("tpocancel").onclick = () => {
   if (!ord) return;
+  if (SRV) { srvDo("/api/order/cancel", {}, m => ordBad(m)); return; }
   ord = null; const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
   showView("form"); $("tpwarn").textContent = "已撤单"; if (!pos && !tOpen) feedStop(); scheduleRender();
 };
@@ -736,6 +832,7 @@ function warnLiq() {
 function editLevel(which) {
   if (!pos) return;
   const el = which === "tp" ? $("tptp2") : $("tpsl2"), v = pnum(el), p = feed.price;
+  if (SRV) return void srvDo("/api/pos/edit", { [which]: el.value.trim() === "" ? null : el.value }, m => { $("tpwarn2").textContent = m; });
   if (el.value.trim() === "") { pos[which] = null; warnLiq(); scheduleRender(); return; }
   const ok = v && (which === "tp" ? (pos.side > 0 ? v > p : v < p) : (pos.side > 0 ? v < p : v > p));
   if (!ok) { $("tpwarn2").textContent = (which === "tp" ? "止盈" : "止损") + "价需在现价" + ((which === "tp") === (pos.side > 0) ? "上方" : "下方"); return; }
@@ -743,14 +840,18 @@ function editLevel(which) {
 }
 $("tptp2").onchange = () => editLevel("tp");
 $("tpsl2").onchange = () => editLevel("sl");
-$("tpend").onclick = () => { if (pos) closePos("手动平仓", feed.price != null ? feed.price : pos.last); };
+$("tpend").onclick = () => { if (SRV) { if (pos) srvDo("/api/pos/close", {}, m => { $("tpwarn2").textContent = m; }); return; } if (pos) closePos("手动平仓", feed.price != null ? feed.price : pos.last); };
 
 function closePos(why, px) {
   const q = pos; pos = null;
   const liq = why === "爆仓";
   const roe = liq ? -1 : roeAt(px, q);
-  const move = q.side * (px / q.entry - 1);
-  const fees = liq || !q.fee ? 0 : -q.lev * (foOf(q) + TAKER * px / q.entry);
+  renderSummary({ why, inst: q.inst, side: q.side, lev: q.lev, how: q.how, entry: q.entry, px, fee: q.fee, roe, liq,
+    move: q.side * (px / q.entry - 1), fees: liq || !q.fee ? 0 : -q.lev * (foOf(q) + TAKER * px / q.entry),
+    dur: Date.now() - q.t0, hi: Math.max(q.hi, roe), lo: Math.min(q.lo, roe) });
+}
+function renderSummary(s) {
+  const q = s, why = s.why, px = s.px, liq = s.liq, roe = s.roe, move = s.move, fees = s.fees;
   const d = q.entry >= 1000 ? 1 : 2, row = (a, b) => '<div class="kv"><span>' + a + "</span><span>" + b + "</span></div>";
   $("sumwhy").textContent = why;
   const e = $("sumroe"); e.textContent = pc(roe); e.className = "big " + (roe >= 0 ? "up" : "dn");
@@ -760,13 +861,14 @@ function closePos(why, px) {
     row("价格变动 (按方向)", '<span class="' + (move >= 0 ? "up" : "dn") + '">' + pc(move, 3) + "</span>") +
     row("本金收益率", '<span class="' + (roe >= 0 ? "up" : "dn") + '">' + pc(roe) + (q.fee ? " (含手续费)" : "") + "</span>") +
     (q.fee ? row("其中手续费", liq ? "已计入爆仓" : pc(fees)) : "") +
-    row("持仓时长", dur(Date.now() - q.t0)) +
-    row("期间最高 / 最低收益", '<span class="up">' + pc(Math.max(q.hi, roe)) + '</span> / <span class="dn">' + pc(Math.min(q.lo, roe)) + "</span>") +
+    row("持仓时长", dur(s.dur)) +
+    row("期间最高 / 最低收益", '<span class="up">' + pc(s.hi) + '</span> / <span class="dn">' + pc(s.lo) + "</span>") +
     (liq ? row("说明", "保证金亏光, 本金全损") : "");
   const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
   showView("sum"); setTrade(true); scheduleRender();
 }
-$("sumok").onclick = () => { $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); };
+$("sumok").onclick = async () => { if (SRV) { srvSeen = null; try { srvApply(await api("POST", "/api/ack", {})); } catch (e) { $("tpwarn").textContent = "服务器连不上"; return; } }
+  $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); };
 
 function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
   const o = pos && pos.inst === inst ? pos : null, w = !pos && ord && ord.inst === inst ? ord : null;
@@ -783,6 +885,21 @@ function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
     ctx.fillStyle = col; ctx.fillText(name + " " + fmt(v, d), L + pw - 4, y - 2);
   }
 }
+$("tpcfg").onclick = () => { $("tpsurl").value = SRV ? SRV.url : ""; $("tpstok").value = SRV ? SRV.tok : ""; $("tpswarn").textContent = ""; prevView = curView === "set" ? prevView : curView; showView("set"); setTrade(true); };
+let prevView = "form";
+$("tpsback").onclick = () => showView(pos ? "pos" : ord ? "ord" : prevView === "set" ? "form" : prevView);
+$("tpsok").onclick = async () => {
+  const url = $("tpsurl").value.trim().replace(/\/+$/, ""), tok = $("tpstok").value.trim();
+  if (url) {
+    try { await (await fetch(url + "/api/ping")).json(); } catch (e) { $("tpswarn").textContent = "连不上这个地址, 检查地址和 Tailscale"; return; }
+    try { const r = await fetch(url + "/api/state", { headers: { "X-Token": tok } }); if (r.status === 401) { $("tpswarn").textContent = "口令不对"; return; } } catch (e) { $("tpswarn").textContent = "连不上这个地址"; return; }
+  }
+  store("srv", url); store("tok", tok);
+  try { if (window.pywebview && pywebview.api && pywebview.api.set_server) await pywebview.api.set_server(url, tok); } catch (e) {}
+  const u = new URL(location.href); u.searchParams.delete("local"); if (url) { u.searchParams.set("srv", url); u.searchParams.set("tok", tok); } else { u.searchParams.delete("srv"); u.searchParams.delete("tok"); u.searchParams.set("local", ""); }
+  location.href = u.toString();
+};
+srvLabel(); if (SRV) srvSync();
 showView("form"); clampLev();
 setInst(inst);
 </script>

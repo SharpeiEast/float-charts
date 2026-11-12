@@ -13,6 +13,8 @@ import sys
 import threading
 import time
 import traceback
+import urllib.parse
+import urllib.request
 
 import webview
 
@@ -20,7 +22,7 @@ MAX_WINS = 3
 DEFAULT_INSTS = ["qqq", "eth", "btc"]
 DEFAULT_TF = "1h"
 CFG_VER = 2           # version 2: the default period is 1h (older saved periods are reset once)
-DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": DEFAULT_TF}]}
+DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": DEFAULT_TF}], "srv": "", "tok": ""}   # srv / tok: SIMU server address and token
 GAP = 30 if sys.platform == "darwin" else 4          # title-bar allowance between stacked windows
 TITLES = {"qqq": "QQQUSDT", "eth": "ETH 永续", "btc": "BTC 永续"}
 
@@ -88,6 +90,16 @@ class SlotApi:
         self._app.set_state(self._slot, inst, tf, title)
         return True
 
+    def set_server(self, url, tok):
+        """The page saved a SIMU server address / token: remember them for the next start and for new windows."""
+        try:
+            self._app.cfg["srv"], self._app.cfg["tok"] = str(url or "").strip(), str(tok or "").strip()
+            self._app._write()
+            return True
+        except Exception:
+            log("set_server failed:\n" + traceback.format_exc())
+            return False
+
     def set_panel(self, opened, width):
         """The SIMU side panel opened / closed: widen the window to the right by the panel width (and shrink it back), so the chart keeps its size."""
         try:
@@ -112,6 +124,10 @@ class App:
     # ---- window creation ----
     def _create(self, slot, inst, tf, x, y):
         url = self.html + "?inst=" + str(inst) + "&tf=" + str(tf) + ("&market=spot" if self.spot else "")
+        if self.cfg.get("srv"):
+            url += "&srv=" + urllib.parse.quote(str(self.cfg["srv"]), safe="") + "&tok=" + urllib.parse.quote(str(self.cfg.get("tok", "")), safe="")
+        else:
+            url += "&local"
         win = webview.create_window(TITLES.get(inst, "QQQUSDT"), url=url, js_api=SlotApi(self, slot),
                                     width=int(self.cfg["width"]), height=int(self.cfg["height"]),
                                     x=int(x), y=int(y), min_size=(360, 240), on_top=True)
@@ -272,6 +288,16 @@ def run_selftest(app, result_path):
     # use the panel while it is open: pick Put, open a position, read it, close it, read the summary
     time.sleep(8)
     js = lambda code: win0.evaluate_js(code)
+    if app.cfg.get("srv"):                       # server mode (CI starts simu_server.py in test mode): feed it a price first
+        def tick(sym, p):
+            req = urllib.request.Request(app.cfg["srv"] + "/api/_test/tick", data=json.dumps({"inst": sym, "p": p}).encode(), headers={"X-Token": app.cfg.get("tok", ""), "Content-Type": "application/json"}, method="POST")
+            urllib.request.urlopen(req, timeout=10).read()
+        try:
+            tick("qqq", 100.0)
+        except Exception as exc:
+            out["errors"].append("srv tick: %r" % (exc,))
+        time.sleep(4)
+        out["srv_label"] = js("document.getElementById('tpsrv').textContent")
     out["simu_trade"] = {"price_line": js("document.getElementById('tppx').textContent")}
     js("document.getElementById('tpput').click()")
     out["simu_trade"]["put_class"] = js("document.getElementById('tpput').className")
@@ -285,6 +311,18 @@ def run_selftest(app, result_path):
     time.sleep(1)
     out["simu_trade"]["summary"] = js("JSON.stringify([document.getElementById('tp-sum').style.display, document.getElementById('sumwhy').textContent, document.getElementById('sumroe').textContent])")
     js("document.getElementById('sumok').click()")
+    if app.cfg.get("srv"):                       # a position that the server closes by itself (stop-loss) while the panel is just open
+        try:
+            js("document.getElementById('tpbuy').click(); document.getElementById('tpsl').value='95'; document.getElementById('tpgo').click()")
+            time.sleep(3)
+            out["srv_auto"] = {"opened": js("document.getElementById('tpdesc').textContent")}
+            tick("qqq", 94.0)
+            time.sleep(4)
+            out["srv_auto"]["summary"] = js("JSON.stringify([document.getElementById('tp-sum').style.display, document.getElementById('sumwhy').textContent, document.getElementById('sumroe').textContent])")
+            js("document.getElementById('sumok').click()")
+            time.sleep(2)
+        except Exception as exc:
+            out["errors"].append("srv_auto: %r" % (exc,))
     win0.evaluate_js("document.getElementById('tbtn').click()")
     time.sleep(3)
     out["simu_closed"] = {"geo": list(app.geo[0]), "panel_displayed": win0.evaluate_js("getComputedStyle(document.getElementById('tp')).display"),
@@ -332,6 +370,9 @@ def main():
     if selftest and len(sys.argv) > sys.argv.index("--selftest") + 1 and not sys.argv[sys.argv.index("--selftest") + 1].startswith("--"):
         result_path = sys.argv[sys.argv.index("--selftest") + 1]
     app = App(selftest, spot="--spot" in sys.argv)
+    if selftest and "--srv" in sys.argv:
+        app.cfg["srv"] = sys.argv[sys.argv.index("--srv") + 1]
+        app.cfg["tok"] = sys.argv[sys.argv.index("--tok") + 1] if "--tok" in sys.argv else ""
     app.open_initial()
     if selftest:
         webview.start(run_selftest, (app, result_path))
