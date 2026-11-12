@@ -365,6 +365,12 @@ class Engine:
             self.say(q, f"{word[0]} at {fmt(px)} ({roe * 100:+.1f}% of margin)", f"{fmt(px)} で{word[1]}(証拠金比 {roe * 100:+.1f}%)")
 
     def say(self, q, en, ja):
+        try:
+            self._say(q, en, ja)
+        except Exception as e:                 # a notification problem must never break the trading state
+            log(f"notify failed: {e!r}")
+
+    def _say(self, q, en, ja):
         side = "Buy" if q["side"] > 0 else "Put"
         sj = "買い" if q["side"] > 0 else "売り"
         name = LABEL[q["inst"]]
@@ -464,7 +470,10 @@ class Engine:
 
 
 def log(msg):
-    print(time.strftime("%F %T"), msg, flush=True)
+    try:
+        print(time.strftime("%F %T"), msg, flush=True)
+    except Exception:
+        pass
 
 
 def bark(text):
@@ -577,6 +586,11 @@ def serve(host, port, handler):
 
 
 def main():
+    for st in (sys.stdout, sys.stderr):
+        try:
+            st.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", action="append")
     ap.add_argument("--port", type=int, default=8765)
