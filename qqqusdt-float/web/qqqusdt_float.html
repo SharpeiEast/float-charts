@@ -23,6 +23,21 @@
   #cv { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
   select { font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
   #toast { position:absolute; right:10px; top:44px; background:#2b3646; color:var(--fg); padding:4px 10px; border-radius:5px; font-size:12px; display:none; z-index:5; }
+  #tbtn.pos { color:var(--up); border-color:var(--up); } #tbtn.neg { color:var(--dn); border-color:var(--dn); }
+  #tp { position:absolute; top:0; right:0; bottom:0; width:250px; box-sizing:border-box; background:var(--panel); border-left:1px solid var(--line); transform:translateX(100%); transition:transform .18s ease; z-index:6; overflow-y:auto; padding:8px 10px 10px; font-size:12px; }
+  #tp.open { transform:none; }
+  #tp .h { display:flex; align-items:center; gap:6px; margin-bottom:6px; } #tp .h b { font-size:13px; }
+  #tp .r { display:flex; align-items:center; gap:6px; margin:5px 0; } #tp .r > span.k { color:var(--muted); width:44px; flex:none; }
+  #tp input[type=number], #tp input[type=text] { width:0; flex:1; min-width:0; font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
+  #tp input[type=range] { flex:1; min-width:0; }
+  #tp .hint { color:var(--muted); font-size:11px; min-width:52px; text-align:right; }
+  #tp .two { display:flex; gap:6px; } #tp .two button { flex:1; padding:4px 0; }
+  #tp button.buy.on { background:var(--up); border-color:var(--up); } #tp button.put.on { background:var(--dn); border-color:var(--dn); }
+  #tp .go { width:100%; padding:6px 0; margin-top:6px; font-weight:700; border-color:var(--accent); } #tp .go.stop { border-color:var(--dn); }
+  #tp .big { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; margin:2px 0 4px; }
+  #tp .kv { display:flex; justify-content:space-between; margin:3px 0; } #tp .kv span:first-child { color:var(--muted); }
+  #tp .warn { color:#e0a030; font-size:11px; min-height:14px; margin-top:4px; }
+  .up { color:var(--up); } .dn { color:var(--dn); }
   #msg { position:absolute; left:10px; bottom:26px; font-size:12px; color:var(--muted); pointer-events:none; }
 </style>
 </head>
@@ -36,18 +51,50 @@
     <span class="sp"></span>
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
+    <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">模拟</button>
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
   </div>
-  <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div><div id="toast"></div></div>
+  <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div><div id="toast"></div>
+    <div id="tp">
+      <div class="h"><b>模拟合约</b><span class="sp"></span><span id="tppx" class="lb"></span><button id="tpx" title="收起">✕</button></div>
+      <div id="tp-form">
+        <div class="r"><span class="k">品种</span><select id="tpi" style="flex:1"></select></div>
+        <div class="r"><span class="k">杠杆</span><input type="range" id="tplv" min="1" max="25" step="1" value="10"><input type="number" id="tplvn" min="1" max="25" step="1" value="10" style="flex:none;width:46px"><span>x</span></div>
+        <div class="two"><button id="tpbuy" class="buy on" title="Buy: 价格上涨赚钱">Buy 做多</button><button id="tpput" class="put" title="Put: 价格下跌赚钱">Put 做空</button></div>
+        <div class="r"><span class="k">止盈价</span><input type="text" id="tptp" placeholder="可选" inputmode="decimal"><span class="hint" id="tptph"></span></div>
+        <div class="r"><span class="k">止损价</span><input type="text" id="tpsl" placeholder="可选" inputmode="decimal"><span class="hint" id="tpslh"></span></div>
+        <div class="r"><label><input type="checkbox" id="tpfee" checked>含手续费 0.05%/边</label></div>
+        <button id="tpgo" class="go">开仓 (按现价)</button>
+        <div class="warn" id="tpwarn"></div>
+      </div>
+      <div id="tp-pos" style="display:none">
+        <div class="kv"><span id="tpdesc"></span><span id="tpdur"></span></div>
+        <div class="big" id="tproe">--</div>
+        <div class="kv"><span>开仓价</span><span id="tpent"></span></div>
+        <div class="kv"><span>现价</span><span id="tpnow"></span></div>
+        <div class="kv"><span>爆仓价</span><span id="tpliq"></span></div>
+        <div class="r"><span class="k">止盈价</span><input type="text" id="tptp2" placeholder="无" inputmode="decimal"></div>
+        <div class="r"><span class="k">止损价</span><input type="text" id="tpsl2" placeholder="无" inputmode="decimal"></div>
+        <div class="warn" id="tpwarn2"></div>
+        <button id="tpend" class="go stop">平仓</button>
+      </div>
+      <div id="tp-sum" style="display:none">
+        <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
+        <div class="big" id="sumroe">--</div>
+        <div id="sumrows"></div>
+        <button id="sumok" class="go">确定, 再来一单</button>
+      </div>
+    </div>
+  </div>
 </div>
 <script>
 "use strict";
 const Q = new URLSearchParams(location.search);
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 const MARKETS = {
-  perp: { sym: "QQQUSDT", label: "QQQUSDT 永续", short: "QQQUSDT", tag: "永续", rest: "https://fapi.binance.com/fapi/v1/klines", ws: "wss://fstream.binance.com/market/stream" },
-  spot: { sym: "QQQBUSDT", label: "QQQBUSDT 现货", short: "QQQBUSDT", tag: "现货", rest: "https://data-api.binance.vision/api/v3/klines", ws: "wss://data-stream.binance.vision/stream" }
+  perp: { sym: "QQQUSDT", label: "QQQUSDT 永续", short: "QQQUSDT", tag: "永续", rest: "https://fapi.binance.com/fapi/v1/klines", px: "https://fapi.binance.com/fapi/v1/ticker/price", ws: "wss://fstream.binance.com/market/stream" },
+  spot: { sym: "QQQBUSDT", label: "QQQBUSDT 现货", short: "QQQBUSDT", tag: "现货", rest: "https://data-api.binance.vision/api/v3/klines", px: "https://data-api.binance.vision/api/v3/ticker/price", ws: "wss://data-stream.binance.vision/stream" }
 };
 const BN = MARKETS[Q.get("market")] || MARKETS.perp;
 const MAX_WINS = 3;
@@ -291,6 +338,8 @@ function render() {
     ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(fmt(lc.c), L + pw + 6, ly);
   }
 
+  drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph);
+
   // legend (top-left): live values of the latest candle, or of the candle under the cursor while hovering
   const inPlot = hover && hover.x >= L && hover.x <= L + pw && hover.y >= T && hover.y <= T + ph;
   let idx = i1;
@@ -428,6 +477,167 @@ $("add").onclick = async () => {
   if (!w) toast("浏览器拦截了弹出窗口, 请允许");
 };
 if (Q.has("diag")) document.title += "  [secure=" + window.isSecureContext + " pip=" + ("documentPictureInPicture" in window) + " ua=" + navigator.userAgent.match(/(Chrome|Edg)\/[\d.]+/g) + "]";
+
+// ---------- simulated contract trading (practice only: no capital, no history) ----------
+// ROE (return on margin) = side * leverage * (price / entry - 1), minus taker fees on the notional at both ends (optional).
+// Liquidation: margin + PnL - open fee <= maintenance margin (notional * MMR). MMR below: BTC/ETH = Binance first tier; QQQ is an assumed value.
+const TR = { qqq: { max: 25, mmr: 0.02 }, eth: { max: 150, mmr: 0.004 }, btc: { max: 150, mmr: 0.004 } };
+const TAKER = 0.0005;
+let pos = null, tOpen = false, tSide = 1, tInst = inst, feed = { ws: null, sym: null, price: null, at: 0, poll: null };
+Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INSTS[k].label; $("tpi").appendChild(o); });
+const pnum = el => { const v = parseFloat(String(el.value).replace(/,/g, "")); return v > 0 ? v : null; };
+const pc = (v, d) => (v >= 0 ? "+" : "") + (v * 100).toFixed(d == null ? 2 : d) + "%";
+const roeAt = (p, q) => { const r = p / q.entry; let v = q.side * q.lev * (r - 1); if (q.fee) v -= q.lev * TAKER * (1 + r); return v; };
+const liqOf = q => { const m = TR[q.inst].mmr, f0 = q.fee ? q.lev * TAKER : 0; return q.entry * (q.side * q.lev - 1 + f0) / (q.lev * (q.side - m)); };
+const dur = ms => { const s = Math.round(ms / 1000); return s < 3600 ? Math.floor(s / 60) + "分" + pad2(s % 60) + "秒" : Math.floor(s / 3600) + "小时" + pad2(Math.floor(s % 3600 / 60)) + "分"; };
+const sideName = s => s > 0 ? "Buy 做多" : "Put 做空";
+
+function feedStop() { clearInterval(feed.poll); if (feed.ws) { feed.ws.onmessage = feed.ws.onclose = feed.ws.onerror = null; try { feed.ws.close(); } catch (e) {} } feed = { ws: null, sym: null, price: null, at: 0, poll: null }; }
+function feedStart(k) {
+  const sym = INSTS[k].sym;
+  if (feed.sym === sym && (feed.ws || MOCK)) return;
+  feedStop(); feed.sym = sym;
+  if (MOCK) { const c = candles[candles.length - 1]; feed.price = c ? c.c : 100; feed.at = Date.now() + 1e12; updateTrade(); return; }
+  const my = feed;
+  const open = () => {
+    if (feed !== my) return;
+    let w; try { w = new WebSocket(MK.ws + "?streams=" + sym.toLowerCase() + "@miniTicker"); } catch (e) { return; }
+    my.ws = w;
+    w.onmessage = ev => { if (feed !== my) return; let m; try { m = JSON.parse(ev.data); } catch (e) { return; } const d = m.data || m; if (d && d.c) feedTick(+d.c); };
+    w.onclose = () => { if (feed === my) setTimeout(open, 2000); };
+    w.onerror = () => {};
+  };
+  open();
+  my.poll = setInterval(async () => {       // REST fallback when the stream is silent
+    if (feed !== my || Date.now() - my.at < 6000) return;
+    try { const r = await fetch(MK.px + "?symbol=" + sym); const j = await r.json(); if (feed === my && j.price) feedTick(+j.price); } catch (e) {}
+  }, 3000);
+}
+function feedTick(p) { if (!(p > 0)) return; feed.price = p; feed.at = Date.now(); updateTrade(); }
+window.__tick = p => feedTick(p);            // test hook (mock mode)
+const fresh = () => feed.price != null && Date.now() - feed.at < 12000;
+
+function updateTrade() {
+  const p = feed.price, d = p != null && p >= 1000 ? 1 : 2;
+  $("tppx").textContent = p == null ? "等待行情…" : (fresh() ? "" : "行情过期 ") + fmt(p, d);
+  if (pos && p != null) {
+    pos.last = p;
+    const roe = roeAt(p, pos);
+    pos.hi = Math.max(pos.hi, roe); pos.lo = Math.min(pos.lo, roe);
+    const hitLiq = pos.side > 0 ? p <= pos.liq : p >= pos.liq;
+    if (hitLiq) { closePos("爆仓", p); return; }
+    if (pos.tp != null && (pos.side > 0 ? p >= pos.tp : p <= pos.tp)) { closePos("触发止盈", p); return; }
+    if (pos.sl != null && (pos.side > 0 ? p <= pos.sl : p >= pos.sl)) { closePos("触发止损", p); return; }
+    const e = $("tproe"); e.textContent = pc(roe); e.className = "big " + (roe >= 0 ? "up" : "dn");
+    $("tpnow").textContent = fmt(p, d); $("tpdur").textContent = dur(Date.now() - pos.t0);
+    const b = $("tbtn"); b.textContent = pc(roe, 1); b.className = roe >= 0 ? "pos" : "neg";
+    scheduleRender();
+  }
+  if (!pos) hints();
+}
+function hints() {
+  const p = feed.price; if (p == null) return;
+  const q = { inst: tInst, side: tSide, lev: +$("tplvn").value || 1, entry: p, fee: $("tpfee").checked };
+  const one = (el, hint, kind) => {
+    const v = pnum(el); const h = $(hint);
+    if (!v) { h.textContent = ""; h.className = "hint"; return; }
+    const ok = kind === "tp" ? (tSide > 0 ? v > p : v < p) : (tSide > 0 ? v < p : v > p);
+    if (!ok) { h.textContent = tSide > 0 === (kind === "tp") ? "须高于现价" : "须低于现价"; h.className = "hint dn"; return; }
+    const r = roeAt(v, q); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up" : "dn");
+  };
+  one($("tptp"), "tptph", "tp"); one($("tpsl"), "tpslh", "sl");
+  const lq = liqOf(q); $("tpwarn").textContent = "爆仓价约 " + fmt(lq, p >= 1000 ? 1 : 2) + (q.lev >= 100 ? "  (高杠杆极易爆仓)" : "");
+}
+function showView(v) {
+  $("tp-form").style.display = v === "form" ? "" : "none"; $("tp-pos").style.display = v === "pos" ? "" : "none"; $("tp-sum").style.display = v === "sum" ? "" : "none";
+}
+function clampLev() {
+  const mx = TR[tInst].max; $("tplv").max = mx; $("tplvn").max = mx;
+  let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v;
+}
+function setTrade(open) {
+  tOpen = open; $("tp").classList.toggle("open", open);
+  if (open) { if (!pos) { tInst = inst; $("tpi").value = tInst; clampLev(); } feedStart(pos ? pos.inst : tInst); updateTrade(); }
+  else if (!pos) feedStop();
+}
+$("tbtn").onclick = () => setTrade(!tOpen);
+$("tpx").onclick = () => setTrade(false);
+$("tpi").onchange = () => { tInst = $("tpi").value; clampLev(); feedStart(tInst); hints(); };
+$("tplv").oninput = () => { $("tplvn").value = $("tplv").value; hints(); };
+$("tplvn").oninput = () => { if ($("tplvn").value !== "") { clampLev(); hints(); } };
+$("tplvn").onchange = () => { clampLev(); hints(); };
+$("tpbuy").onclick = () => { tSide = 1; $("tpbuy").classList.add("on"); $("tpput").classList.remove("on"); hints(); };
+$("tpput").onclick = () => { tSide = -1; $("tpput").classList.add("on"); $("tpbuy").classList.remove("on"); hints(); };
+["tptp", "tpsl", "tpfee"].forEach(id => $(id).addEventListener("input", hints));
+
+$("tpgo").onclick = () => {
+  if (!fresh()) { $("tpwarn").textContent = "还没有收到最新行情, 请稍等"; return; }
+  const p = feed.price, tp = pnum($("tptp")), sl = pnum($("tpsl"));
+  if (tp && (tSide > 0 ? tp <= p : tp >= p)) { $("tpwarn").textContent = "止盈价设置不合理"; return; }
+  if (sl && (tSide > 0 ? sl >= p : sl <= p)) { $("tpwarn").textContent = "止损价设置不合理"; return; }
+  pos = { inst: tInst, side: tSide, lev: Math.max(1, Math.min(TR[tInst].max, Math.round(+$("tplvn").value || 1))), entry: p, tp, sl, fee: $("tpfee").checked, t0: Date.now(), hi: -Infinity, lo: Infinity, last: p };
+  pos.liq = liqOf(pos);
+  const d = p >= 1000 ? 1 : 2;
+  $("tpdesc").textContent = INSTS[pos.inst].label + " " + sideName(pos.side) + " " + pos.lev + "x";
+  $("tpent").textContent = fmt(p, d); $("tpliq").textContent = fmt(pos.liq, d);
+  $("tptp2").value = tp ? tp : ""; $("tpsl2").value = sl ? sl : ""; $("tpwarn2").textContent = "";
+  warnLiq();
+  showView("pos"); updateTrade();
+};
+function warnLiq() {
+  if (!pos) return;
+  const bad = (pos.sl != null && (pos.side > 0 ? pos.sl <= pos.liq : pos.sl >= pos.liq));
+  $("tpwarn2").textContent = bad ? "止损价在爆仓价之外, 会先爆仓" : "";
+}
+function editLevel(which) {
+  if (!pos) return;
+  const el = which === "tp" ? $("tptp2") : $("tpsl2"), v = pnum(el), p = feed.price;
+  if (el.value.trim() === "") { pos[which] = null; warnLiq(); scheduleRender(); return; }
+  const ok = v && (which === "tp" ? (pos.side > 0 ? v > p : v < p) : (pos.side > 0 ? v < p : v > p));
+  if (!ok) { $("tpwarn2").textContent = (which === "tp" ? "止盈" : "止损") + "价需在现价" + ((which === "tp") === (pos.side > 0) ? "上方" : "下方"); return; }
+  pos[which] = v; warnLiq(); scheduleRender();
+}
+$("tptp2").onchange = () => editLevel("tp");
+$("tpsl2").onchange = () => editLevel("sl");
+$("tpend").onclick = () => { if (pos) closePos("手动平仓", feed.price != null ? feed.price : pos.last); };
+
+function closePos(why, px) {
+  const q = pos; pos = null;
+  const liq = why === "爆仓";
+  const roe = liq ? -1 : roeAt(px, q);
+  const move = q.side * (px / q.entry - 1);
+  const fees = liq || !q.fee ? 0 : -q.lev * TAKER * (1 + px / q.entry);
+  const d = q.entry >= 1000 ? 1 : 2, row = (a, b) => '<div class="kv"><span>' + a + "</span><span>" + b + "</span></div>";
+  $("sumwhy").textContent = why;
+  const e = $("sumroe"); e.textContent = pc(roe); e.className = "big " + (roe >= 0 ? "up" : "dn");
+  $("sumrows").innerHTML =
+    row("品种 / 方向", INSTS[q.inst].label + " · " + sideName(q.side)) + row("杠杆", q.lev + "x") +
+    row("开仓价", fmt(q.entry, d)) + row("平仓价", fmt(px, d)) +
+    row("价格变动 (按方向)", '<span class="' + (move >= 0 ? "up" : "dn") + '">' + pc(move, 3) + "</span>") +
+    row("本金收益率", '<span class="' + (roe >= 0 ? "up" : "dn") + '">' + pc(roe) + (q.fee ? " (含手续费)" : "") + "</span>") +
+    (q.fee ? row("其中手续费", liq ? "已计入爆仓" : pc(fees)) : "") +
+    row("持仓时长", dur(Date.now() - q.t0)) +
+    row("期间最高 / 最低收益", '<span class="up">' + pc(Math.max(q.hi, roe)) + '</span> / <span class="dn">' + pc(Math.min(q.lo, roe)) + "</span>") +
+    (liq ? row("说明", "保证金亏光, 本金全损") : "");
+  const b = $("tbtn"); b.textContent = "模拟"; b.className = "";
+  showView("sum"); setTrade(true); scheduleRender();
+}
+$("sumok").onclick = () => { $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); };
+
+function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
+  if (!pos || pos.inst !== inst) return;
+  const d = pos.entry >= 1000 ? 1 : 2;
+  const items = [["入场", pos.entry, FG, [6, 3]], ["止盈", pos.tp, UP, [2, 3]], ["止损", pos.sl, DN, [2, 3]], ["爆仓", pos.liq, "#e0a030", [1, 3]]];
+  ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+  for (const [name, v, col, dash] of items) {
+    if (v == null) continue;
+    const y = yOf(v); if (y < T || y > T + ph) continue;
+    ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(dash);
+    ctx.beginPath(); ctx.moveTo(L, Math.round(y) + 0.5); ctx.lineTo(L + pw, Math.round(y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = col; ctx.fillText(name + " " + fmt(v, d), L + pw - 4, y - 2);
+  }
+}
+showView("form"); clampLev();
 setInst(inst);
 </script>
 </body>
