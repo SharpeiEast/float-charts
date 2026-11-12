@@ -58,7 +58,7 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="dist/QQQUSDT-Float.exe"; else BIN="dist/QQQUSDT-Float.app/Contents/MacOS/QQQUSDT-Float"; fi
           "$BIN" --selftest selftest.json --spot &
           PID=$!
-          for i in $(seq 1 90); do [ -f selftest.json ] && break; sleep 1; done
+          for i in $(seq 1 150); do [ -f selftest.json ] && break; sleep 1; done
           cat selftest.json || echo "selftest produced no output"
           kill $PID 2>/dev/null || true
 

@@ -261,6 +261,22 @@ def run_selftest(app, result_path):
     time.sleep(3)
     out["simu_open"] = {"before": g0, "after": list(app.geo[0]), "panel_displayed": win0.evaluate_js("getComputedStyle(document.getElementById('tp')).display"),
                         "chart_width": win0.evaluate_js("Math.round(document.getElementById('cv').getBoundingClientRect().width)")}
+    # use the panel while it is open: pick Put, open a position, read it, close it, read the summary
+    time.sleep(8)
+    js = lambda code: win0.evaluate_js(code)
+    out["simu_trade"] = {"price_line": js("document.getElementById('tppx').textContent")}
+    js("document.getElementById('tpput').click()")
+    out["simu_trade"]["put_class"] = js("document.getElementById('tpput').className")
+    js("document.getElementById('tpbuy').click()")
+    out["simu_trade"]["buy_class"] = js("document.getElementById('tpbuy').className")
+    js("document.getElementById('tpput').click()")
+    js("document.getElementById('tpgo').click()")
+    time.sleep(2)
+    out["simu_trade"]["opened"] = js("JSON.stringify([document.getElementById('tp-pos').style.display, document.getElementById('tpdesc').textContent, document.getElementById('tpwarn').textContent, document.getElementById('tproe').textContent])")
+    js("document.getElementById('tpend').click()")
+    time.sleep(1)
+    out["simu_trade"]["summary"] = js("JSON.stringify([document.getElementById('tp-sum').style.display, document.getElementById('sumwhy').textContent, document.getElementById('sumroe').textContent])")
+    js("document.getElementById('sumok').click()")
     win0.evaluate_js("document.getElementById('tbtn').click()")
     time.sleep(3)
     out["simu_closed"] = {"geo": list(app.geo[0]), "panel_displayed": win0.evaluate_js("getComputedStyle(document.getElementById('tp')).display"),
