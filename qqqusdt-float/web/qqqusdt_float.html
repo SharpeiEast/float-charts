@@ -532,7 +532,7 @@ let SRV = null, skew = 0, srvBusy = false, srvOk = null, srvSeen = null;
 (function () {
   if (Q.get("srv")) { store("srv", Q.get("srv")); store("tok", Q.get("tok") || ""); }
   else if (Q.get("tok")) store("tok", Q.get("tok"));
-  let u = Q.get("srv") || store("srv") || (SERVED ? location.origin : "");
+  let u = Q.get("srv") || store("srv") || (SERVED ? location.origin : (store("srv") === null ? "http://100.78.175.68:8765" : ""));
   if (Q.get("local") != null) u = "";
   if (u) SRV = { url: u.replace(/\/+$/, ""), tok: Q.get("tok") || store("tok") || "" };
 })();

@@ -21,8 +21,9 @@ import webview
 MAX_WINS = 3
 DEFAULT_INSTS = ["qqq", "eth", "btc"]
 DEFAULT_TF = "1h"
+DEFAULT_SRV = "http://100.78.175.68:8765"      # SIMU server (Tailscale address); change it in the panel (gear button)
 CFG_VER = 2           # version 2: the default period is 1h (older saved periods are reset once)
-DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": DEFAULT_TF}], "srv": "", "tok": ""}   # srv / tok: SIMU server address and token
+DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": DEFAULT_TF}], "srv": DEFAULT_SRV, "tok": ""}   # srv / tok: SIMU server address (pre-filled) and token; srv "" = local mode
 GAP = 30 if sys.platform == "darwin" else 4          # title-bar allowance between stacked windows
 TITLES = {"qqq": "QQQUSDT", "eth": "ETH 永续", "btc": "BTC 永续"}
 
@@ -370,6 +371,8 @@ def main():
     if selftest and len(sys.argv) > sys.argv.index("--selftest") + 1 and not sys.argv[sys.argv.index("--selftest") + 1].startswith("--"):
         result_path = sys.argv[sys.argv.index("--selftest") + 1]
     app = App(selftest, spot="--spot" in sys.argv)
+    if selftest:
+        app.cfg["srv"] = app.cfg["tok"] = ""
     if selftest and "--srv" in sys.argv:
         app.cfg["srv"] = sys.argv[sys.argv.index("--srv") + 1]
         app.cfg["tok"] = sys.argv[sys.argv.index("--tok") + 1] if "--tok" in sys.argv else ""
