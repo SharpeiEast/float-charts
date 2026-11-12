@@ -117,7 +117,12 @@
       <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
       <div class="big" id="sumroe">--</div>
       <div id="sumrows"></div>
-      <button id="sumok" class="go">确定, 再来一单</button>
+      <div id="sumrecbox">
+        <input id="sumnote" type="text" maxlength="500" placeholder="复盘备注 (可选)" style="width:100%;box-sizing:border-box;margin-top:8px">
+        <button id="sumrec" class="go">记录到 us01a, 再来一单</button>
+      </div>
+      <button id="sumok" class="go">不记录, 再来一单</button>
+      <div class="warn" id="sumwarn"></div>
     </div>
   </div>
 </div>
@@ -868,10 +873,15 @@ function renderSummary(s) {
     row("期间最高 / 最低收益", '<span class="up">' + pc(s.hi) + '</span> / <span class="dn">' + pc(s.lo) + "</span>") +
     (liq ? row("说明", "保证金亏光, 本金全损") : "");
   const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
+  $("sumrecbox").style.display = SRV ? "" : "none"; $("sumok").textContent = SRV ? "不记录, 再来一单" : "确定, 再来一单";
+  $("sumnote").value = ""; $("sumwarn").textContent = "";
   showView("sum"); setTrade(true); scheduleRender();
 }
-$("sumok").onclick = async () => { if (SRV) { srvSeen = null; try { srvApply(await api("POST", "/api/ack", {})); } catch (e) { $("tpwarn").textContent = "服务器连不上"; return; } }
-  $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); };
+$("sumrec").onclick = () => sumDone(true);
+$("sumok").onclick = () => sumDone(false);
+async function sumDone(keep) {
+  if (SRV) { srvSeen = null; try { srvApply(await api("POST", "/api/ack", keep ? { keep: true, note: $("sumnote").value.trim() } : {})); } catch (e) { $("sumwarn").textContent = keep ? "记录失败: 服务器连不上或写入出错, 这次总结还在, 可重试" : "服务器连不上"; return; } }
+  $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); }
 
 function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
   const o = pos && pos.inst === inst ? pos : null, w = !pos && ord && ord.inst === inst ? ord : null;

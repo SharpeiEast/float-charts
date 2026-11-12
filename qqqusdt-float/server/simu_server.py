@@ -16,7 +16,8 @@ API (JSON, header X-Token or ?tok= must match the token file, except /api/ping):
   POST /api/order/cancel
   POST /api/pos/edit     {tp?, sl?}
   POST /api/pos/close
-  POST /api/ack          drop the oldest trade summary (the page has shown it)
+  POST /api/ack          {keep?, note?} drop the oldest trade summary (the page has shown it); keep=true first appends it to trades.jsonl (next to the state file)
+  GET  /api/trades?n=200 the recorded trades (newest last)
 """
 import argparse, hmac, ipaddress, json, os, secrets, subprocess, sys, threading, time, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -135,6 +136,7 @@ class Engine:
         self.cur = {}             # sym -> {"id": last aggTrade id seen, "ts": its time}
         self.st = {"rev": 0, "seq": 0, "ord": None, "pos": None, "sums": [], "cur": {}}
         self.saved_at = 0
+        self.journal = os.path.join(os.path.dirname(os.path.abspath(path)), "trades.jsonl")   # trades the user chose to keep, one JSON per line
         try:
             with open(path) as f:
                 self.st.update(json.load(f))
@@ -313,14 +315,35 @@ class Engine:
                 self.close(p, "手动平仓", now_ms(), notify=False)
         return self.view()
 
-    def ack(self):
+    def ack(self, b=None):
+        b = b or {}
         with self.lock:
             if self.st["sums"]:
+                if b.get("keep"):
+                    rec = dict(self.st["sums"][0], rec_at=now_ms(), note=str(b.get("note") or "")[:500])
+                    try:
+                        with open(self.journal, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    except OSError as e:
+                        raise Bad("cannot record the trade: %r" % (e,))
                 self.st["sums"].pop(0)
                 self.bump()
         return self.view()
 
     # -- state transitions
+    def trades(self, n=200):
+        out = []
+        try:
+            with open(self.journal, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        pass
+        except OSError:
+            pass
+        return {"trades": out[-max(1, min(int(n), 100000)):]}
+
     def start_pos(self, o, entry, fo, how, t, notify=True):
         q = {k: o[k] for k in ("inst", "side", "lev", "tp", "sl", "fee")}
         q.update(entry=entry, fo=fo, how=how, t0=t, hi=0.0, lo=0.0, last=entry, id=self.st["seq"])
@@ -357,7 +380,8 @@ class Engine:
         s = {"why": why, "inst": q["inst"], "side": q["side"], "lev": q["lev"], "how": q["how"], "entry": q["entry"], "px": px, "fee": q["fee"],
              "roe": roe, "move": q["side"] * (px / q["entry"] - 1), "liq": liq,
              "fees": 0.0 if (liq or not q["fee"]) else -q["lev"] * (fo_of(q) + TAKER * px / q["entry"]),
-             "dur": t - q["t0"], "hi": max(q["hi"], roe), "lo": min(q["lo"], roe), "at": t}
+             "dur": t - q["t0"], "hi": max(q["hi"], roe), "lo": min(q["lo"], roe), "at": t,
+             "t0": q["t0"], "tp": q.get("tp"), "sl": q.get("sl"), "id": q.get("id")}
         self.st["sums"].append(s)
         self.bump()
         if notify:
@@ -543,6 +567,11 @@ def make_handler(eng, token, html_path):
                 return self.send(401, {"error": "bad token"})
             if u.path == "/api/state":
                 return self.send(200, eng.view((q.get("inst") or [None])[0]))
+            if u.path == "/api/trades":
+                try:
+                    return self.send(200, eng.trades((q.get("n") or ["200"])[0]))
+                except ValueError:
+                    return self.send(400, {"error": "bad n"})
             self.send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -558,7 +587,7 @@ def make_handler(eng, token, html_path):
             try:
                 r = {"/api/order": lambda: eng.place(b), "/api/order/edit": lambda: eng.edit_order(b),
                      "/api/order/cancel": eng.cancel_order, "/api/pos/edit": lambda: eng.edit_pos(b),
-                     "/api/pos/close": eng.close_manual, "/api/ack": eng.ack}.get(u.path)
+                     "/api/pos/close": eng.close_manual, "/api/ack": lambda: eng.ack(b)}.get(u.path)
                 if TEST and u.path == "/api/_test/tick":
                     eng.net.push(SYM[b["inst"]], b["p"], b.get("t"))
                     return self.send(200, {"ok": True})
