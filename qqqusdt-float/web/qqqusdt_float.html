@@ -91,10 +91,14 @@
       <div class="kv"><span id="tpodesc"></span></div>
       <div class="kv"><span>委托倒计时</span><span id="tpocd"></span></div>
       <div class="big" id="tpobig">--</div>
-      <div class="kv"><span>限价</span><span id="tpoprice"></span></div>
       <div class="kv"><span>现价</span><span id="tpopx"></span></div>
-      <div class="kv"><span>距离</span><span id="tpodist"></span></div>
-      <div class="kv"><span>止盈 / 止损</span><span id="tpotpsl"></span></div>
+      <div class="kv"><span>距离限价</span><span id="tpodist"></span></div>
+      <div class="r"><span class="k">限价</span><input type="text" id="tpoprice" inputmode="decimal"><span class="hint" id="tpokind"></span></div>
+      <div class="r"><span class="k">杠杆</span><input type="number" id="tpolev" min="1" step="1"><span>x</span></div>
+      <div class="r"><span class="k">止盈价</span><input type="text" id="tpotp" placeholder="无" inputmode="decimal"></div>
+      <div class="r"><span class="k">止损价</span><input type="text" id="tposl" placeholder="无" inputmode="decimal"></div>
+      <div class="r"><span class="k">倒计时</span><input type="number" id="tpomin" min="1" max="1440" step="1"><span>分钟</span></div>
+      <div class="hint" style="text-align:left;margin:-2px 0 2px 0">修改后按回车或点别处生效; 改倒计时 = 从现在起重新计时</div>
       <div class="warn" id="tpowarn"></div>
       <button id="tpocancel" class="go stop">撤单</button>
     </div>
@@ -645,9 +649,7 @@ $("tpgo").onclick = () => {
   ord = Object.assign(base, { price: lp, kind: kindOf(tSide, lp, cur), cur0: cur, mins, t0: Date.now(), expAt: Date.now() + mins * 60000 });
   const d = lp >= 1000 ? 1 : 2;
   $("tpodesc").textContent = INSTS[ord.inst].label + " " + sideName(ord.side) + " " + ord.lev + "x";
-  $("tpoprice").textContent = fmt(lp, d) + (ord.kind === "stop" ? " (突破开仓)" : ord.kind === "limit" ? " (回落/反弹到此价)" : "");
-  $("tpotpsl").textContent = (tp ? fmt(tp, d) : "无") + " / " + (sl ? fmt(sl, d) : "无");
-  $("tpowarn").textContent = "有效期 " + mins + " 分钟, 超时自动撤单";
+  syncOrd(); ordInfo();
   showView("ord"); orderUI(); updateTrade(); scheduleRender();
 };
 // pending order: reached -> becomes a position; countdown over -> cancelled
@@ -660,7 +662,7 @@ function checkOrder(p) {
   const entry = maker ? o.price : p;
   const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
   toast("限价单已成交 " + fmt(entry, entry >= 1000 ? 1 : 2));
-  startPos(o, entry, maker ? MAKER : TAKER, maker ? "限价成交" : "突破成交");
+  startPos(o, entry, maker ? MAKER : TAKER, maker ? "限价成交" : o.kind === "now" ? "现价成交" : "突破成交");
 }
 function orderUI() {
   if (!ord) return;
@@ -678,6 +680,49 @@ function orderUI() {
   const b = $("tbtn"); b.textContent = "SIMU " + mm; b.className = "";
 }
 setInterval(() => { if (ord) orderUI(); }, 1000);
+const odec = () => ord && ord.price >= 1000 ? 1 : 2;
+function syncOrd() {                    // put the order's values into the editable fields
+  if (!ord) return;
+  $("tpoprice").value = fmt(ord.price, odec()); $("tpolev").value = ord.lev; $("tpotp").value = ord.tp ? ord.tp : ""; $("tposl").value = ord.sl ? ord.sl : ""; $("tpomin").value = ord.mins;
+}
+function ordInfo(msg) {
+  if (!ord) return;
+  const o = ord, lq = liqOf({ inst: o.inst, side: o.side, lev: o.lev, entry: o.price, fee: o.fee, fo: o.kind === "limit" ? MAKER : TAKER });
+  $("tpokind").textContent = o.kind === "stop" ? "突破" : o.kind === "limit" ? "回落/反弹" : "现价";
+  $("tpowarn").textContent = msg || ("成交后爆仓价约 " + fmt(lq, odec()) + ", 超时自动撤单");
+  $("tpowarn").style.color = msg ? "var(--dn)" : "";
+}
+function ordBad(msg) { syncOrd(); ordInfo(msg); }
+$("tpoprice").onchange = () => {
+  if (!ord) return;
+  const v = pnum($("tpoprice")); if (!v) return ordBad("限价无效");
+  const o = ord;
+  if (o.tp && (o.side > 0 ? o.tp <= v : o.tp >= v)) return ordBad("新限价与止盈价冲突, 请先改止盈价");
+  if (o.sl && (o.side > 0 ? o.sl >= v : o.sl <= v)) return ordBad("新限价与止损价冲突, 请先改止损价");
+  o.price = v; if (feed.price != null) o.kind = kindOf(o.side, v, feed.price);
+  syncOrd(); ordInfo(); orderUI(); scheduleRender(); if (feed.price != null) checkOrder(feed.price);
+};
+$("tpolev").onchange = () => {
+  if (!ord) return;
+  const mx = TR[ord.inst].max, v = Math.round(Number($("tpolev").value));
+  if (!(v >= 1)) return ordBad("杠杆至少 1 倍");
+  ord.lev = Math.min(mx, v); syncOrd(); ordInfo(v > mx ? "最大杠杆 " + mx + "x, 已改为 " + mx + "x" : undefined);
+};
+const editOrdLevel = which => {
+  if (!ord) return;
+  const el = which === "tp" ? $("tpotp") : $("tposl"), v = pnum(el);
+  if (el.value.trim() === "") { ord[which] = null; syncOrd(); ordInfo(); scheduleRender(); return; }
+  const ok = v && (which === "tp" ? (ord.side > 0 ? v > ord.price : v < ord.price) : (ord.side > 0 ? v < ord.price : v > ord.price));
+  if (!ok) return ordBad((which === "tp" ? "止盈" : "止损") + "价需在限价" + ((which === "tp") === (ord.side > 0) ? "上方" : "下方"));
+  ord[which] = v; syncOrd(); ordInfo(); scheduleRender();
+};
+$("tpotp").onchange = () => editOrdLevel("tp");
+$("tposl").onchange = () => editOrdLevel("sl");
+$("tpomin").onchange = () => {
+  if (!ord) return;
+  const m = Number($("tpomin").value); if (!(m >= 1 && m <= 1440)) return ordBad("倒计时需在 1 到 1440 分钟之间");
+  ord.mins = m; ord.expAt = Date.now() + m * 60000; syncOrd(); ordInfo(); orderUI();
+};
 $("tpocancel").onclick = () => {
   if (!ord) return;
   ord = null; const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
