@@ -218,7 +218,7 @@ class Engine:
                 self.bump()
                 self.check_order(cur, t)           # a limit at the market fills at once
             else:
-                self.start_pos(base, cur, TAKER, "市价", now_ms())
+                self.start_pos(base, cur, TAKER, "市价", now_ms(), notify=False)
         return self.view()
 
     def edit_order(self, b):
@@ -321,7 +321,7 @@ class Engine:
         return self.view()
 
     # -- state transitions
-    def start_pos(self, o, entry, fo, how, t):
+    def start_pos(self, o, entry, fo, how, t, notify=True):
         q = {k: o[k] for k in ("inst", "side", "lev", "tp", "sl", "fee")}
         q.update(entry=entry, fo=fo, how=how, t0=t, hi=0.0, lo=0.0, last=entry, id=self.st["seq"])
         q["hi"] = q["lo"] = roe_at(entry, q)
@@ -329,7 +329,8 @@ class Engine:
         self.st["ord"] = None
         self.st["pos"] = q
         self.bump()
-        self.say(q, f"filled at {fmt(entry)}", f"{fmt(entry)} で約定しました")
+        if notify:                             # a market order the user placed by hand needs no message, a resting limit order that fills does
+            self.say(q, f"filled at {fmt(entry)}", f"{fmt(entry)} で約定しました")
 
     def check_order(self, p, t):
         o = self.st["ord"]

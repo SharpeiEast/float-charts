@@ -170,6 +170,7 @@ function setInst(k) {
   document.title = INSTS[k].title;
   if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
   reportState();
+  if (!pos && !ord && tInst !== k) { tInst = k; $("tpi").value = k; clampLev(); if (tOpen) { feedStart(k); hints(); } }   // and the panel follows the chart
   start();
 }
 $("inst").onchange = () => setInst($("inst").value);
@@ -689,7 +690,7 @@ function setTrade(open) {
 }
 $("tbtn").onclick = () => setTrade(!tOpen);
 $("tpx").onclick = () => setTrade(false);
-$("tpi").onchange = () => { tInst = $("tpi").value; clampLev(); feedStart(tInst); hints(); };
+$("tpi").onchange = () => { tInst = $("tpi").value; clampLev(); feedStart(tInst); hints(); if (tInst !== inst) setInst(tInst); };   // the chart follows the instrument picked in the panel
 $("tplv").oninput = () => { $("tplvn").value = $("tplv").value; hints(); };
 $("tplvn").oninput = () => { if ($("tplvn").value !== "") { clampLev(); hints(); } };
 $("tplvn").onchange = () => { clampLev(); hints(); };
