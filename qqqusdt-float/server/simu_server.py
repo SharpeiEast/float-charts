@@ -18,7 +18,7 @@ API (JSON, header X-Token or ?tok= must match the token file, except /api/ping):
   POST /api/pos/close
   POST /api/ack          drop the oldest trade summary (the page has shown it)
 """
-import argparse, hmac, json, os, secrets, subprocess, sys, threading, time, urllib.parse, urllib.request
+import argparse, hmac, ipaddress, json, os, secrets, subprocess, sys, threading, time, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SYM = {"qqq": "QQQUSDT", "eth": "ETHUSDT", "btc": "BTCUSDT"}
@@ -27,6 +27,7 @@ LABEL = {"qqq": "QQQ", "eth": "ETH", "btc": "BTC"}
 TAKER, MAKER, DEF_EXP = 0.0005, 0.0002, 30
 FAPI = "https://fapi.binance.com"
 TEST = bool(os.environ.get("SIMU_TEST"))
+TAILNET = ipaddress.ip_network("100.64.0.0/10")
 
 
 def now_ms():
@@ -505,6 +506,13 @@ def make_handler(eng, token, html_path):
             self.send(204, b"", "text/plain")
 
         def authed(self, q):
+            if not TEST:                       # we only listen on the Tailscale address and loopback: those peers are the owner's own devices
+                try:
+                    ip = ipaddress.ip_address(self.client_address[0])
+                    if ip.is_loopback or ip in TAILNET:
+                        return True
+                except ValueError:
+                    pass
             t = self.headers.get("X-Token") or (q.get("tok") or [""])[0]
             return hmac.compare_digest(t.encode(), token.encode())
 
