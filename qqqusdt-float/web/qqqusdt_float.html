@@ -133,7 +133,7 @@ const NB = 20, KB = 2;
 const $ = id => document.getElementById(id);
 const app = $("app"), cv = $("cv"), ctx = cv.getContext("2d");
 
-let tf = TFS.includes(Q.get("tf")) ? Q.get("tf") : (TFS.includes(store("tf")) ? store("tf") : "15m");
+let tf = TFS.includes(Q.get("tf")) ? Q.get("tf") : (TFS.includes(store("tf")) ? store("tf") : "1h");
 let bbOn = store("bb") !== "0";
 let candles = [], bands = [], ticker = null, tickerAt = 0, view = { n: 90, off: 0 }, hover = null;
 let ws = null, gen = 0, lastMsg = 0, status = "init", pollTimer = null, wd = null;

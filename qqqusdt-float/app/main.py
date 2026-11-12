@@ -18,7 +18,9 @@ import webview
 
 MAX_WINS = 3
 DEFAULT_INSTS = ["qqq", "eth", "btc"]
-DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": "15m"}]}
+DEFAULT_TF = "1h"
+CFG_VER = 2           # version 2: the default period is 1h (older saved periods are reset once)
+DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": DEFAULT_TF}]}
 GAP = 30 if sys.platform == "darwin" else 4          # title-bar allowance between stacked windows
 TITLES = {"qqq": "QQQUSDT", "eth": "ETH 永续", "btc": "BTC 永续"}
 
@@ -55,7 +57,13 @@ def log(msg):
 def load_cfg():
     try:
         with open(config_path(), encoding="utf-8") as fh:
-            cfg = {**DEFAULT, **json.load(fh)}
+            raw = json.load(fh)
+        cfg = {**DEFAULT, **raw}
+        if raw.get("ver", 1) < CFG_VER:                  # config written by an older version: start from the new default period once
+            for s in cfg.get("slots", []):
+                if isinstance(s, dict):
+                    s["tf"] = DEFAULT_TF
+        cfg["ver"] = CFG_VER
         cfg["slots"] = [s for s in cfg.get("slots", []) if isinstance(s, dict) and s.get("inst") in TITLES][:MAX_WINS] or DEFAULT["slots"]
         return cfg
     except Exception:
@@ -128,12 +136,12 @@ class App:
     def open_initial(self):
         slots = self.cfg["slots"][:MAX_WINS]
         if self.selftest:
-            slots = [{"inst": "qqq", "tf": "15m"}]
+            slots = [{"inst": "qqq", "tf": "15m"}]  # self-test keeps its own fixed period
         for i, s in enumerate(slots):
             y = int(self.cfg["y"]) + i * (int(self.cfg["height"]) + GAP)
-            self._create(i, s["inst"], s.get("tf", "15m"), self.cfg["x"], y)
+            self._create(i, s["inst"], s.get("tf", DEFAULT_TF), self.cfg["x"], y)
 
-    def add_window(self, inst=None, tf="15m"):
+    def add_window(self, inst=None, tf=DEFAULT_TF):
         with self.lock:
             free = [s for s in range(MAX_WINS) if s not in self.wins]
             if not free:
