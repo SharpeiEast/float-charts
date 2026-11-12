@@ -13,9 +13,20 @@
 | 版本 | 位置 | 怎么用 |
 |---|---|---|
 | 网页版 | `web/qqqusdt_float.html` | 把这一个文件拷到电脑,用 Chrome / Edge(116 以上)打开,点右上角「浮窗」得到置顶小窗口 |
-| 程序版 | Releases 里的 `.exe` / `.zip` | Windows 双击 exe;Mac 解压后打开 `.app`。窗口自带置顶,不需要浏览器 |
+| 程序版 | Releases 里的 `.exe` / `.zip` / `.deb` | Windows 双击 exe;Mac 解压后打开 `.app`;Ubuntu 用 `sudo apt install ./xxx.deb`。Windows / Mac 窗口自带置顶,不需要浏览器 |
 
 程序版内部就是把同一个网页放进系统自带的网页组件(Windows 的 WebView2、Mac 的 WebKit),所以两个版本画面和功能一致。
+
+### Ubuntu / Debian 桌面版
+
+Releases 里的 `qqqusdt-float_<版本>_all.deb`。装法:
+
+```
+sudo apt install ./qqqusdt-float_<版本>_all.deb
+qqqusdt-float
+```
+
+也可以在应用菜单里找「QQQUSDT Float」。它用系统自带的 GTK 和 WebKit(`python3-gi`、`gir1.2-webkit2-4.1`,安装时会自动带上),所以窗口、画面和功能和其他系统一致,SIMU 面板展开时窗口会向右变宽。已在 Ubuntu 26.04(Python 3.14,Wayland 桌面)上实测,编译机用 22.04 构建并自动测试。和 Windows / Mac 版的区别:Ubuntu 版**不置顶**(Wayland 不允许程序自己置顶,要置顶用窗口标题栏菜单里的「始终在最上面」)。程序默认走 XWayland(`GDK_BACKEND=x11`),这样窗口才能自己变宽;要改成原生 Wayland 可以先设 `GDK_BACKEND=wayland`,但那样 SIMU 面板展开时窗口可能不会自己变宽(没有实测)。卸载:`sudo apt remove qqqusdt-float`。
 
 ### Windows 首次运行
 没有代码签名,Windows SmartScreen 会提示"未识别的应用":点「更多信息」→「仍要运行」。需要系统自带的 WebView2 运行库(Windows 10/11 一般已经有,没有的话装 Edge 即可)。

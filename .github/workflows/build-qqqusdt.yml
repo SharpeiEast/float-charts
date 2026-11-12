@@ -99,3 +99,61 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: qqqusdt-float/out/*
+
+  deb:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: qqqusdt-float
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi python3-pip gir1.2-gtk-3.0 gir1.2-webkit2-4.1 xvfb xdotool
+
+      - name: Build the .deb
+        run: |
+          VER="${GITHUB_REF_NAME#qqqusdt-v}"
+          case "$GITHUB_REF" in refs/tags/qqqusdt-v*) ;; *) VER="0.0.0-ci" ;; esac
+          bash ubuntu/build-deb.sh "$VER" out
+          ls -la out
+
+      - name: Install it and smoke test (virtual display)
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y ./out/*.deb
+          export GDK_BACKEND=x11
+          xvfb-run -a -s "-screen 0 1600x1000x24" qqqusdt-float --selftest selftest_deb.json --spot &
+          PID=$!
+          for i in $(seq 1 200); do [ -f selftest_deb.json ] && break; sleep 1; done
+          cat selftest_deb.json || echo "deb selftest produced no output"
+          kill $PID 2>/dev/null || true
+
+      - name: Smoke test, server mode
+        continue-on-error: true
+        run: |
+          mkdir -p srvtest
+          echo ci > srvtest/token
+          SIMU_TEST=1 SIMU_NO_BARK=1 python3 server/simu_server.py --host 127.0.0.1 --port 8765 --state srvtest/state.json --token-file srvtest/token --html web/qqqusdt_float.html > srvtest/server.log 2>&1 &
+          SPID=$!
+          sleep 3
+          xvfb-run -a -s "-screen 0 1600x1000x24" qqqusdt-float --selftest selftest_deb_srv.json --spot --srv http://127.0.0.1:8765 --tok ci &
+          PID=$!
+          for i in $(seq 1 200); do [ -f selftest_deb_srv.json ] && break; sleep 1; done
+          cat selftest_deb_srv.json || echo "deb server selftest produced no output"
+          echo; tail -5 srvtest/server.log
+          kill $PID 2>/dev/null || true
+          kill $SPID 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qqqusdt-float-deb
+          path: qqqusdt-float/out/*.deb
+
+      - name: Attach to the GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/qqqusdt-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: qqqusdt-float/out/*.deb

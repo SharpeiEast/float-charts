@@ -22,7 +22,8 @@
   label { cursor:pointer; user-select:none; color:var(--muted); display:flex; align-items:center; gap:3px; }
   #wrap { position:relative; flex:1; min-height:0; }
   #cv { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
-  select { font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
+  select { font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; color-scheme:dark; }
+  select option { background:var(--panel); color:var(--fg); }
   #toast { position:absolute; right:10px; top:44px; background:#2b3646; color:var(--fg); padding:4px 10px; border-radius:5px; font-size:12px; display:none; z-index:5; }
   #tbtn.pos { color:var(--up); border-color:var(--up); } #tbtn.neg { color:var(--dn); border-color:var(--dn); }
   #tp { display:none; flex:none; width:250px; box-sizing:border-box; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:8px 10px 10px; font-size:12px; }
