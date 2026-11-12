@@ -52,6 +52,7 @@ jobs:
           ditto -c -k --keepParent dist/QQQUSDT-Float.app dist/${{ matrix.artifact }}.zip
 
       - name: Smoke test (opens 3 windows, switches one, closes one, reads the pages)
+        if: runner.os != 'macOS'          # a second app launch in the same macOS job never starts, so macOS runs only the server-mode test below
         continue-on-error: true
         shell: bash
         run: |
@@ -60,19 +61,6 @@ jobs:
           PID=$!
           for i in $(seq 1 150); do [ -f selftest.json ] && break; sleep 1; done
           cat selftest.json || echo "selftest produced no output"
-          kill $PID 2>/dev/null || true
-
-      - name: Control (macOS only), the plain smoke test a second time
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        shell: bash
-        run: |
-          BIN="dist/QQQUSDT-Float.app/Contents/MacOS/QQQUSDT-Float"
-          sleep 5
-          "$BIN" --selftest selftest_ctl.json --spot &
-          PID=$!
-          for i in $(seq 1 150); do [ -f selftest_ctl.json ] && break; sleep 1; done
-          if [ -f selftest_ctl.json ]; then echo "CONTROL: output produced"; else echo "CONTROL: no output"; fi
           kill $PID 2>/dev/null || true
 
       - name: Smoke test, server mode (the page trades through simu_server.py)
@@ -85,8 +73,6 @@ jobs:
           SPID=$!
           sleep 3
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="dist/QQQUSDT-Float.exe"; else BIN="dist/QQQUSDT-Float.app/Contents/MacOS/QQQUSDT-Float"; fi
-          pkill -f QQQUSDT-Float || true
-          sleep 8
           "$BIN" --selftest selftest_srv.json --spot --srv http://127.0.0.1:8765 --tok ci &
           PID=$!
           for i in $(seq 1 200); do [ -f selftest_srv.json ] && break; sleep 1; done
