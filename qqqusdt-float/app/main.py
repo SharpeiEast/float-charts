@@ -126,7 +126,7 @@ class App:
     def _create(self, slot, inst, tf, x, y):
         url = self.html + "?inst=" + str(inst) + "&tf=" + str(tf) + ("&market=spot" if self.spot else "")
         if self.cfg.get("srv"):
-            url += "&srv=" + urllib.parse.quote(str(self.cfg["srv"]), safe=":/") + "&tok=" + urllib.parse.quote(str(self.cfg.get("tok", "")), safe="")
+            url += "&srv=" + urllib.parse.quote(str(self.cfg["srv"]), safe="") + "&tok=" + urllib.parse.quote(str(self.cfg.get("tok", "")), safe="")
         else:
             url += "&local"
         win = webview.create_window(TITLES.get(inst, "QQQUSDT"), url=url, js_api=SlotApi(self, slot),
