@@ -72,6 +72,8 @@ jobs:
           SPID=$!
           sleep 3
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="dist/QQQUSDT-Float.exe"; else BIN="dist/QQQUSDT-Float.app/Contents/MacOS/QQQUSDT-Float"; fi
+          pkill -f QQQUSDT-Float || true
+          sleep 8
           "$BIN" --selftest selftest_srv.json --spot --srv http://127.0.0.1:8765 --tok ci &
           PID=$!
           for i in $(seq 1 200); do [ -f selftest_srv.json ] && break; sleep 1; done

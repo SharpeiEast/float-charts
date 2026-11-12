@@ -542,6 +542,7 @@ async function api(method, path, body) {
   if (!r.ok) { const er = new Error(j.error || ("HTTP " + r.status)); er.http = r.status; throw er; }
   return j;
 }
+const SSYM = { qqq: "QQQUSDT", eth: "ETHUSDT", btc: "BTCUSDT" };      // the server always trades the perpetual contracts
 const watchInst = () => pos ? pos.inst : ord ? ord.inst : (tOpen ? tInst : inst);
 function srvLabel() {
   const e = $("tpsrv");
@@ -562,7 +563,7 @@ const sameJ = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const typing = id => document.activeElement === $(id);
 function srvApply(st) {
   skew = st.now - Date.now();
-  const sym = INSTS[watchInst()].sym, pr = st.prices[sym];
+  const sym = SSYM[watchInst()], pr = st.prices[sym];
   feed.sym = sym;
   if (pr) { feed.price = pr.p; feed.at = Date.now() - Math.max(0, st.now - pr.t); }
   const np = st.pos, op = pos;
