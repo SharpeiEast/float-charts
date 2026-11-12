@@ -80,6 +80,14 @@ class SlotApi:
         self._app.set_state(self._slot, inst, tf, title)
         return True
 
+    def set_panel(self, opened, width):
+        """The SIMU side panel opened / closed: widen the window to the right by the panel width (and shrink it back), so the chart keeps its size."""
+        try:
+            return self._app.set_panel(self._slot, bool(opened), int(width))
+        except Exception:
+            log("set_panel failed:\n" + traceback.format_exc())
+            return False
+
 
 class App:
     def __init__(self, selftest=False, spot=False):
@@ -89,6 +97,7 @@ class App:
         self.lock = threading.RLock()
         self.wins = {}        # slot -> window
         self.state = {}       # slot -> {"inst", "tf"}
+        self.panel = {}       # slot -> width of the SIMU panel currently added to the window
         self.geo = {}         # slot -> [x, y, width, height], kept up to date from the moved/resized events (never read the window's properties from event handlers or other threads)
         self.html = resource(os.path.join("web", "qqqusdt_float.html"))
 
@@ -162,6 +171,33 @@ class App:
             except Exception:
                 pass
 
+    def set_panel(self, slot, opened, width):
+        with self.lock:
+            win, g = self.wins.get(slot), self.geo.get(slot)
+            if win is None or g is None:
+                return False
+            if opened == (slot in self.panel):
+                return True
+            x, y, w, h = g
+            if opened:
+                self.panel[slot] = width
+                nw = w + width
+                try:                                      # keep the widened window on the screen: slide it left if it would run off the right edge
+                    scr = [sc for sc in webview.screens if sc.x <= x < sc.x + sc.width] or list(webview.screens)[:1]
+                    if scr and x + nw > scr[0].x + scr[0].width:
+                        nx = max(scr[0].x, scr[0].x + scr[0].width - nw)
+                        win.move(nx, y)
+                        g[0] = nx
+                except Exception:
+                    pass
+            else:
+                width = self.panel.pop(slot)
+                nw = max(360, w - width)
+            win.resize(nw, h)
+            g[2] = nw
+            log("panel %s slot=%s width %s -> %s" % ("open" if opened else "close", slot, w, nw))
+            return True
+
     def _geo(self, slot, at, a, b):
         try:
             g = self.geo.get(slot)
@@ -175,6 +211,7 @@ class App:
             self.wins.pop(slot, None)
             self.state.pop(slot, None)       # keep the closed window's instrument out of the saved list
             self.geo.pop(slot, None)
+            self.panel.pop(slot, None)
             self._save_slots()
         log("closed slot=%s, open now: %s" % (slot, sorted(self.wins)))
 
@@ -182,7 +219,7 @@ class App:
         try:
             g = self.geo.get(slot)
             if g:
-                self.cfg["width"], self.cfg["height"] = g[2], g[3]
+                self.cfg["width"], self.cfg["height"] = g[2] - self.panel.get(slot, 0), g[3]      # without the SIMU panel
             if self.geo:
                 top = min(self.geo.values(), key=lambda v: v[1])
                 self.cfg["x"], self.cfg["y"] = top[0], top[1]
@@ -219,6 +256,15 @@ def run_selftest(app, result_path):
     win0.evaluate_js("document.getElementById('add').click()")
     time.sleep(6)
     out["click_add"] = {"toast": win0.evaluate_js("document.getElementById('toast').textContent"), "slots": sorted(app.wins)}
+    g0 = list(app.geo[0])
+    win0.evaluate_js("document.getElementById('tbtn').click()")
+    time.sleep(3)
+    out["simu_open"] = {"before": g0, "after": list(app.geo[0]), "panel_displayed": win0.evaluate_js("getComputedStyle(document.getElementById('tp')).display"),
+                        "chart_width": win0.evaluate_js("Math.round(document.getElementById('cv').getBoundingClientRect().width)")}
+    win0.evaluate_js("document.getElementById('tbtn').click()")
+    time.sleep(3)
+    out["simu_closed"] = {"geo": list(app.geo[0]), "panel_displayed": win0.evaluate_js("getComputedStyle(document.getElementById('tp')).display"),
+                          "chart_width": win0.evaluate_js("Math.round(document.getElementById('cv').getBoundingClientRect().width)")}
     out["add3"] = app.add_window()
     out["add4_refused"] = app.add_window()
     time.sleep(12)

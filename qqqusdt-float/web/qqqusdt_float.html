@@ -7,7 +7,8 @@
 <style id="css">
   :root { --bg:#10151c; --panel:#161c25; --fg:#d7dde5; --muted:#8793a1; --line:#273140; --accent:#3b82f6; --up:#2ebd6b; --dn:#e5534b; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif; overflow:hidden; }
-  #app { display:flex; flex-direction:column; width:100vw; height:100vh; background:var(--bg); }
+  #app { display:flex; flex-direction:row; width:100vw; height:100vh; background:var(--bg); }
+  #col { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; }
   #hdr { display:flex; align-items:center; gap:10px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); font-size:13px; white-space:nowrap; overflow:hidden; flex-wrap:wrap; row-gap:4px; }
   .lb { color:var(--muted); font-size:12px; margin-right:-4px; }
   .num { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
@@ -24,8 +25,8 @@
   select { font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
   #toast { position:absolute; right:10px; top:44px; background:#2b3646; color:var(--fg); padding:4px 10px; border-radius:5px; font-size:12px; display:none; z-index:5; }
   #tbtn.pos { color:var(--up); border-color:var(--up); } #tbtn.neg { color:var(--dn); border-color:var(--dn); }
-  #tp { position:absolute; top:0; right:0; bottom:0; width:250px; box-sizing:border-box; background:var(--panel); border-left:1px solid var(--line); transform:translateX(100%); transition:transform .18s ease; z-index:6; overflow-y:auto; padding:8px 10px 10px; font-size:12px; }
-  #tp.open { transform:none; }
+  #tp { display:none; flex:none; width:250px; box-sizing:border-box; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:8px 10px 10px; font-size:12px; }
+  #tp.open { display:block; }
   #tp .h { display:flex; align-items:center; gap:6px; margin-bottom:6px; } #tp .h b { font-size:13px; }
   #tp .r { display:flex; align-items:center; gap:6px; margin:5px 0; } #tp .r > span.k { color:var(--muted); width:44px; flex:none; }
   #tp input[type=number], #tp input[type=text] { width:0; flex:1; min-width:0; font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
@@ -44,6 +45,7 @@
 <body>
 <div id="holder" style="display:none;padding:24px;color:#8793a1;font:14px sans-serif">浮窗已打开。关闭浮窗后图表会回到这里。</div>
 <div id="app">
+  <div id="col">
   <div id="hdr">
     <select id="inst" title="选择品种"></select>
     <span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span><span id="ydot" title="Yahoo 推送状态"></span>
@@ -51,40 +53,41 @@
     <span class="sp"></span>
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
-    <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">模拟</button>
+    <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
   </div>
   <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div><div id="toast"></div>
-    <div id="tp">
-      <div class="h"><b>模拟合约</b><span class="sp"></span><span id="tppx" class="lb"></span><button id="tpx" title="收起">✕</button></div>
-      <div id="tp-form">
-        <div class="r"><span class="k">品种</span><select id="tpi" style="flex:1"></select></div>
-        <div class="r"><span class="k">杠杆</span><input type="range" id="tplv" min="1" max="25" step="1" value="10"><input type="number" id="tplvn" min="1" max="25" step="1" value="10" style="flex:none;width:46px"><span>x</span></div>
-        <div class="two"><button id="tpbuy" class="buy on" title="Buy: 价格上涨赚钱">Buy 做多</button><button id="tpput" class="put" title="Put: 价格下跌赚钱">Put 做空</button></div>
-        <div class="r"><span class="k">止盈价</span><input type="text" id="tptp" placeholder="可选" inputmode="decimal"><span class="hint" id="tptph"></span></div>
-        <div class="r"><span class="k">止损价</span><input type="text" id="tpsl" placeholder="可选" inputmode="decimal"><span class="hint" id="tpslh"></span></div>
-        <div class="r"><label><input type="checkbox" id="tpfee" checked>含手续费 0.05%/边</label></div>
-        <button id="tpgo" class="go">开仓 (按现价)</button>
-        <div class="warn" id="tpwarn"></div>
-      </div>
-      <div id="tp-pos" style="display:none">
-        <div class="kv"><span id="tpdesc"></span><span id="tpdur"></span></div>
-        <div class="big" id="tproe">--</div>
-        <div class="kv"><span>开仓价</span><span id="tpent"></span></div>
-        <div class="kv"><span>现价</span><span id="tpnow"></span></div>
-        <div class="kv"><span>爆仓价</span><span id="tpliq"></span></div>
-        <div class="r"><span class="k">止盈价</span><input type="text" id="tptp2" placeholder="无" inputmode="decimal"></div>
-        <div class="r"><span class="k">止损价</span><input type="text" id="tpsl2" placeholder="无" inputmode="decimal"></div>
-        <div class="warn" id="tpwarn2"></div>
-        <button id="tpend" class="go stop">平仓</button>
-      </div>
-      <div id="tp-sum" style="display:none">
-        <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
-        <div class="big" id="sumroe">--</div>
-        <div id="sumrows"></div>
-        <button id="sumok" class="go">确定, 再来一单</button>
-      </div>
+  </div>
+  </div>
+  <div id="tp">
+    <div class="h"><b>模拟合约</b><span class="sp"></span><span id="tppx" class="lb"></span><button id="tpx" title="收起">✕</button></div>
+    <div id="tp-form">
+      <div class="r"><span class="k">品种</span><select id="tpi" style="flex:1"></select></div>
+      <div class="r"><span class="k">杠杆</span><input type="range" id="tplv" min="1" max="25" step="1" value="10"><input type="number" id="tplvn" min="1" max="25" step="1" value="10" style="flex:none;width:46px"><span>x</span></div>
+      <div class="two"><button id="tpbuy" class="buy on" title="Buy: 价格上涨赚钱">Buy 做多</button><button id="tpput" class="put" title="Put: 价格下跌赚钱">Put 做空</button></div>
+      <div class="r"><span class="k">止盈价</span><input type="text" id="tptp" placeholder="可选" inputmode="decimal"><span class="hint" id="tptph"></span></div>
+      <div class="r"><span class="k">止损价</span><input type="text" id="tpsl" placeholder="可选" inputmode="decimal"><span class="hint" id="tpslh"></span></div>
+      <div class="r"><label><input type="checkbox" id="tpfee" checked>含手续费 0.05%/边</label></div>
+      <button id="tpgo" class="go">开仓 (按现价)</button>
+      <div class="warn" id="tpwarn"></div>
+    </div>
+    <div id="tp-pos" style="display:none">
+      <div class="kv"><span id="tpdesc"></span><span id="tpdur"></span></div>
+      <div class="big" id="tproe">--</div>
+      <div class="kv"><span>开仓价</span><span id="tpent"></span></div>
+      <div class="kv"><span>现价</span><span id="tpnow"></span></div>
+      <div class="kv"><span>爆仓价</span><span id="tpliq"></span></div>
+      <div class="r"><span class="k">止盈价</span><input type="text" id="tptp2" placeholder="无" inputmode="decimal"></div>
+      <div class="r"><span class="k">止损价</span><input type="text" id="tpsl2" placeholder="无" inputmode="decimal"></div>
+      <div class="warn" id="tpwarn2"></div>
+      <button id="tpend" class="go stop">平仓</button>
+    </div>
+    <div id="tp-sum" style="display:none">
+      <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
+      <div class="big" id="sumroe">--</div>
+      <div id="sumrows"></div>
+      <button id="sumok" class="go">确定, 再来一单</button>
     </div>
   </div>
 </div>
@@ -530,7 +533,7 @@ function updateTrade() {
     if (pos.sl != null && (pos.side > 0 ? p <= pos.sl : p >= pos.sl)) { closePos("触发止损", p); return; }
     const e = $("tproe"); e.textContent = pc(roe); e.className = "big " + (roe >= 0 ? "up" : "dn");
     $("tpnow").textContent = fmt(p, d); $("tpdur").textContent = dur(Date.now() - pos.t0);
-    const b = $("tbtn"); b.textContent = pc(roe, 1); b.className = roe >= 0 ? "pos" : "neg";
+    const b = $("tbtn"); b.textContent = "SIMU " + pc(roe, 1); b.className = roe >= 0 ? "pos" : "neg";
     scheduleRender();
   }
   if (!pos) hints();
@@ -555,8 +558,12 @@ function clampLev() {
   const mx = TR[tInst].max; $("tplv").max = mx; $("tplvn").max = mx;
   let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v;
 }
+const PANEL_W = 250;
 function setTrade(open) {
+  const was = tOpen;
   tOpen = open; $("tp").classList.toggle("open", open);
+  if (open !== was) { try { if (window.pywebview && pywebview.api && pywebview.api.set_panel) pywebview.api.set_panel(open, PANEL_W); } catch (e) {} }
+  setTimeout(render, 30);
   if (open) { if (!pos) { tInst = inst; $("tpi").value = tInst; clampLev(); } feedStart(pos ? pos.inst : tInst); updateTrade(); }
   else if (!pos) feedStop();
 }
@@ -619,7 +626,7 @@ function closePos(why, px) {
     row("持仓时长", dur(Date.now() - q.t0)) +
     row("期间最高 / 最低收益", '<span class="up">' + pc(Math.max(q.hi, roe)) + '</span> / <span class="dn">' + pc(Math.min(q.lo, roe)) + "</span>") +
     (liq ? row("说明", "保证金亏光, 本金全损") : "");
-  const b = $("tbtn"); b.textContent = "模拟"; b.className = "";
+  const b = $("tbtn"); b.textContent = "SIMU"; b.className = "";
   showView("sum"); setTrade(true); scheduleRender();
 }
 $("sumok").onclick = () => { $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); };
