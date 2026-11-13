@@ -443,9 +443,10 @@ function render() {
   if (bbOn && bands[i1]) {
     const bb = bands[i1];
     for (const [v, col] of [[bb.u, "#5b8cff"], [bb.m, "#e0a030"], [bb.l, "#b07bff"]]) {
+      if (col === "#e0a030") continue;   // the mid line: only the curve, no horizontal line and no number
       const y = yOf(v);
       ctx.setLineDash([5, 4]); ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, Math.round(y) + 0.5); ctx.lineTo(L + pw, Math.round(y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
-      if (col !== "#e0a030") tags.push({ y, ty: y, col, txt: fmt(v) });   // the mid line gets no number
+      tags.push({ y, ty: y, col, txt: fmt(v) });
     }
   }
   if (end >= candles.length) tags.push({ y: ly, ty: ly, col: lup ? UP : DN, txt: fmt(lc.c) });
@@ -959,13 +960,13 @@ function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
   const d = (o ? o.entry : w.price) >= 1000 ? 1 : 2;
   const items = o ? [["入场", o.entry, FG, [6, 3]], ["止盈", o.tp, UP, [2, 3]], ["止损", o.sl, DN, [2, 3]], ["爆仓", o.liq, "#e0a030", [1, 3]]]
                   : [["挂单", w.price, "#5b8cff", [6, 3]], ["止盈", w.tp, UP, [2, 3]], ["止损", w.sl, DN, [2, 3]]];
-  ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+  ctx.textAlign = "left"; ctx.textBaseline = "bottom";   // position labels sit at the left edge: the right side already carries the price tags
   for (const [name, v, col, dash] of items) {
     if (v == null) continue;
     const y = yOf(v); if (y < T || y > T + ph) continue;
     ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(dash);
     ctx.beginPath(); ctx.moveTo(L, Math.round(y) + 0.5); ctx.lineTo(L + pw, Math.round(y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = col; ctx.fillText(name + " " + fmt(v, d), L + pw - 4, y - 2);
+    ctx.fillStyle = col; ctx.fillText(name + " " + fmt(v, d), L + 4, y - 2);
   }
 }
 $("tpcfg").onclick = () => { $("tpsurl").value = SRV ? SRV.url : ""; $("tpstok").value = SRV ? SRV.tok : ""; $("tpswarn").textContent = ""; prevView = curView === "set" ? prevView : curView; showView("set"); setTrade(true); };
