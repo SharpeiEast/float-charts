@@ -52,9 +52,10 @@
   #gridhost { display:none; flex-direction:column; width:100vw; height:100vh; background:var(--bg); }
   body.gridmode #app, body.gridmode #holder { display:none !important; } body.gridmode #gridhost { display:flex; }
   #gbar { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); font-size:13px; }
-  #gcells { flex:1; min-height:0; display:grid; grid-template-columns:repeat(3, 1fr); grid-template-rows:repeat(2, 1fr); gap:2px; background:var(--line); }
-  @media (max-aspect-ratio: 1/1) { #gcells { grid-template-columns:repeat(2, 1fr); grid-template-rows:repeat(3, 1fr); } }
-  #gcells iframe { width:100%; height:100%; border:0; background:var(--bg); display:block; }
+  #gcells { flex:1; min-height:0; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
+  @media (max-aspect-ratio: 1/1) { #gcells { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(3, minmax(0, 1fr)); } }
+  .gc { position:relative; min-width:0; min-height:0; overflow:hidden; background:var(--bg); }
+  .gc iframe { position:absolute; left:0; top:0; width:100%; height:100%; border:0; display:block; }   /* sized by the cell, never by the iframe's own height (WebKit let the rows grow past the window) */
 </style>
 </head>
 <body>
@@ -161,7 +162,7 @@
   const cells = document.getElementById("gcells"), frames = [];
   const srcOf = t => { const u = new URLSearchParams(location.search); u.delete("grid"); u.delete("srv"); u.delete("tok"); u.set("inst", inst); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); return location.pathname + "?" + u.toString(); };
   window.addEventListener("message", e => { const d = e.data; if (d && d.gridpx != null && d.tf === "3m") document.getElementById("gpx").textContent = d.gridpx; });   // one price for all six cells
-  GTF.forEach(t => { const f = document.createElement("iframe"); f.title = t; cells.appendChild(f); frames.push([t, f]); });
+  GTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); cells.appendChild(d); frames.push([t, f]); });
   const load = () => { frames.forEach(([t, f]) => { f.src = srcOf(t); }); document.title = TT[inst] + " · 6 周期"; sel.value = inst; };
   sel.onchange = () => { inst = sel.value; ST("inst", inst); load(); };
   const bb = document.getElementById("gbb"); bb.classList.toggle("on", ST("bb") !== "0");
