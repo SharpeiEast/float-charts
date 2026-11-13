@@ -46,7 +46,9 @@
   #celltf { display:none; font-weight:700; color:var(--accent); }
   body.cell #celltf { display:inline; }
   body.cell #inst, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
-  body.cell #hdr { padding:3px 8px; font-size:12px; } body.cell .num { font-size:15px; }
+  body.cell #hdr { padding:3px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
+  #celltxt { display:none; font-size:11px; line-height:1.35; color:var(--fg); white-space:nowrap; overflow:hidden; min-width:0; font-variant-numeric:tabular-nums; }
+  body.cell #celltxt { display:block; } #celltxt .m { color:var(--muted); }
   #gridhost { display:none; flex-direction:column; width:100vw; height:100vh; background:var(--bg); }
   body.gridmode #app, body.gridmode #holder { display:none !important; } body.gridmode #gridhost { display:flex; }
   #gbar { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); font-size:13px; }
@@ -58,7 +60,7 @@
 <body>
 <div id="holder" style="display:none;padding:24px;color:#8793a1;font:14px sans-serif">浮窗已打开。关闭浮窗后图表会回到这里。</div>
 <div id="gridhost">
-  <div id="gbar"><button id="gback" title="回到单图窗口">← 单图</button><select id="ginst" title="选择品种"></select><button id="gbb" title="布林线 (20, 2σ) 开/关">BL</button><span class="sp"></span><span class="lb">3m · 5m · 15m · 30m · 1h · 4h</span></div>
+  <div id="gbar"><button id="gback" title="回到单图窗口">← 单图</button><select id="ginst" title="选择品种"></select><span id="gpx" class="num" title="最新价">--</span><button id="gbb" title="布林线 (20, 2σ) 开/关">BL</button><span class="sp"></span><span class="lb">3m · 5m · 15m · 30m · 1h · 4h</span></div>
   <div id="gcells"></div>
 </div>
 <div id="app">
@@ -68,7 +70,7 @@
     <span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span><span id="ydot" title="Yahoo 推送状态"></span>
     <span id="px" class="num" title="最新价">--</span><span id="dot" title="连接状态"></span>
     <span class="sp"></span>
-    <span id="celltf"></span>
+    <span id="celltf"></span><span id="celltxt"></span>
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
     <button id="gridbtn" title="六个周期一起看 (3m 5m 15m 30m 1h 4h)">6格</button>
@@ -158,6 +160,7 @@
   Object.keys(INS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INS[k]; sel.appendChild(o); });
   const cells = document.getElementById("gcells"), frames = [];
   const srcOf = t => { const u = new URLSearchParams(location.search); u.delete("grid"); u.delete("srv"); u.delete("tok"); u.set("inst", inst); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); return location.pathname + "?" + u.toString(); };
+  window.addEventListener("message", e => { const d = e.data; if (d && d.gridpx != null && d.tf === "3m") document.getElementById("gpx").textContent = d.gridpx; });   // one price for all six cells
   GTF.forEach(t => { const f = document.createElement("iframe"); f.title = t; cells.appendChild(f); frames.push([t, f]); });
   const load = () => { frames.forEach(([t, f]) => { f.src = srcOf(t); }); document.title = TT[inst] + " · 6 周期"; sel.value = inst; };
   sel.onchange = () => { inst = sel.value; ST("inst", inst); load(); };
@@ -387,7 +390,7 @@ function render() {
   }
   // time axis
   ctx.textAlign = "center"; ctx.textBaseline = "top";
-  const every = Math.max(1, Math.round(n / 6));
+  const every = Math.max(1, Math.round(n / (pw < 400 ? 4 : 6)));
   for (let i = i0; i <= i1; i++) {
     if ((candles.length - 1 - i) % every !== 0) continue;
     const x = xOf(i), d = new Date(candles[i].t), prev = candles[i - 1] ? new Date(candles[i - 1].t) : null;
@@ -443,15 +446,20 @@ function render() {
     }
     const t1 = (liveBar ? "● 当前 " : "") + tlabel(c.t, true) + "  O " + fmt(c.o) + "  H " + fmt(c.h) + "  L " + fmt(c.l) + "  C " + fmt(c.c);
     const t2 = bbOn && b ? "BB  上 " + fmt(b.u) + "  中 " + fmt(b.m) + "  下 " + fmt(b.l) : "";
+    if (CELL) {
+      $("celltxt").innerHTML = (inPlot ? tlabel(c.t, true) + "&nbsp; " : liveBar ? "● " : "") + "O " + fmt(c.o) + " H " + fmt(c.h) + " L " + fmt(c.l) + " C " + fmt(c.c) + (t2 ? "<br><span class='m'>" + t2 + "</span>" : "");
+    } else {
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     const w1 = Math.max(ctx.measureText(t1).width, ctx.measureText(t2).width) + 12, h1 = t2 ? 34 : 20;
     ctx.fillStyle = "rgba(22,28,37,0.92)"; ctx.fillRect(L + 4, T + 2, w1, h1);
     ctx.fillStyle = FG; ctx.fillText(t1, L + 10, T + 6); if (t2) { ctx.fillStyle = MUT; ctx.fillText(t2, L + 10, T + 21); }
+    }
   }
 
   // header: Binance last price (the Yahoo QQQ price is updated by the websocket handler above)
   const px = ticker && Date.now() - tickerAt < 15000 ? ticker.c : lc.c;
   $("px").textContent = fmt(px);
+  if (CELL && window.parent !== window) { const t = fmt(px); if (t !== render.lastPx) { render.lastPx = t; try { window.parent.postMessage({ gridpx: t, tf }, "*"); } catch (e) {} } }
 }
 
 // ---------- interaction ----------
