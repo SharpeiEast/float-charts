@@ -101,6 +101,14 @@ class SlotApi:
             log("set_server failed:\n" + traceback.format_exc())
             return False
 
+    def set_grid(self, on):
+        """The page switched to / from the six-period view: enlarge the window for it and restore the old size afterwards."""
+        try:
+            return self._app.set_grid(self._slot, bool(on))
+        except Exception:
+            log("set_grid failed:\n" + traceback.format_exc())
+            return False
+
     def set_panel(self, opened, width):
         """The SIMU side panel opened / closed: widen the window to the right by the panel width (and shrink it back), so the chart keeps its size."""
         try:
@@ -118,6 +126,7 @@ class App:
         self.lock = threading.RLock()
         self.wins = {}        # slot -> window
         self.state = {}       # slot -> {"inst", "tf"}
+        self.grid = {}        # slot -> [w, h] of the window before it was enlarged for the six-period view
         self.panel = {}       # slot -> width of the SIMU panel currently added to the window
         self.geo = {}         # slot -> [x, y, width, height], kept up to date from the moved/resized events (never read the window's properties from event handlers or other threads)
         self.html = resource(os.path.join("web", "qqqusdt_float.html"))
@@ -223,6 +232,36 @@ class App:
             log("panel %s slot=%s width %s -> %s" % ("open" if opened else "close", slot, w, nw))
             return True
 
+    def set_grid(self, slot, on):
+        with self.lock:
+            win, g = self.wins.get(slot), self.geo.get(slot)
+            if win is None or g is None:
+                return False
+            if on == (slot in self.grid):
+                return True
+            x, y, w, h = g
+            if on:
+                w -= self.panel.pop(slot, 0)               # the page was reloaded: its SIMU panel is closed
+                self.grid[slot] = [w, h]
+                nw, nh = max(w, 1500), max(h, 860)
+                try:
+                    scr = [sc for sc in webview.screens if sc.x <= x < sc.x + sc.width] or list(webview.screens)[:1]
+                    if scr:
+                        nw, nh = min(nw, scr[0].width - 40), min(nh, scr[0].height - 80)
+                        nx, ny = max(scr[0].x, min(x, scr[0].x + scr[0].width - nw)), max(scr[0].y, min(y, scr[0].y + scr[0].height - nh - 40))
+                        win.move(nx, ny)
+                        g[0], g[1] = nx, ny
+                except Exception:
+                    pass
+                win.resize(nw, nh)
+                g[2], g[3] = nw, nh
+            else:
+                w0, h0 = self.grid.pop(slot)
+                win.resize(w0, h0)
+                g[2], g[3] = w0, h0
+            log("grid %s slot=%s" % ("on" if on else "off", slot))
+            return True
+
     def _geo(self, slot, at, a, b):
         try:
             g = self.geo.get(slot)
@@ -237,13 +276,16 @@ class App:
             self.state.pop(slot, None)       # keep the closed window's instrument out of the saved list
             self.geo.pop(slot, None)
             self.panel.pop(slot, None)
+            self.grid.pop(slot, None)
             self._save_slots()
         log("closed slot=%s, open now: %s" % (slot, sorted(self.wins)))
 
     def _save_geometry(self, slot):
         try:
             g = self.geo.get(slot)
-            if g:
+            if g and slot in self.grid:
+                self.cfg["width"], self.cfg["height"] = self.grid[slot]                              # closed while in the six-period view: keep the normal size
+            elif g:
                 self.cfg["width"], self.cfg["height"] = g[2] - self.panel.get(slot, 0), g[3]      # without the SIMU panel
             if self.geo:
                 top = min(self.geo.values(), key=lambda v: v[1])

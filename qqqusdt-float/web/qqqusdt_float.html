@@ -42,10 +42,25 @@
   #tp .two + .two { margin-top:5px; }
   .up { color:var(--up); } .dn { color:var(--dn); }
   #msg { position:absolute; left:10px; bottom:26px; font-size:12px; color:var(--muted); pointer-events:none; }
+  /* six-period view: ?grid=1 is the host (one window, six iframes); every cell is this same page with ?cell=1 */
+  #celltf { display:none; font-weight:700; color:var(--accent); }
+  body.cell #celltf { display:inline; }
+  body.cell #inst, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
+  body.cell #hdr { padding:3px 8px; font-size:12px; } body.cell .num { font-size:15px; }
+  #gridhost { display:none; flex-direction:column; width:100vw; height:100vh; background:var(--bg); }
+  body.gridmode #app, body.gridmode #holder { display:none !important; } body.gridmode #gridhost { display:flex; }
+  #gbar { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); font-size:13px; }
+  #gcells { flex:1; min-height:0; display:grid; grid-template-columns:repeat(3, 1fr); grid-template-rows:repeat(2, 1fr); gap:2px; background:var(--line); }
+  @media (max-aspect-ratio: 1/1) { #gcells { grid-template-columns:repeat(2, 1fr); grid-template-rows:repeat(3, 1fr); } }
+  #gcells iframe { width:100%; height:100%; border:0; background:var(--bg); display:block; }
 </style>
 </head>
 <body>
 <div id="holder" style="display:none;padding:24px;color:#8793a1;font:14px sans-serif">浮窗已打开。关闭浮窗后图表会回到这里。</div>
+<div id="gridhost">
+  <div id="gbar"><button id="gback" title="回到单图窗口">← 单图</button><select id="ginst" title="选择品种"></select><button id="gbb" title="布林线 (20, 2σ) 开/关">BL</button><span class="sp"></span><span class="lb">3m · 5m · 15m · 30m · 1h · 4h</span></div>
+  <div id="gcells"></div>
+</div>
 <div id="app">
   <div id="col">
   <div id="hdr">
@@ -53,8 +68,10 @@
     <span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span><span id="ydot" title="Yahoo 推送状态"></span>
     <span id="px" class="num" title="最新价">--</span><span id="dot" title="连接状态"></span>
     <span class="sp"></span>
+    <span id="celltf"></span>
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
+    <button id="gridbtn" title="六个周期一起看 (3m 5m 15m 30m 1h 4h)">6格</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
@@ -127,9 +144,40 @@
   </div>
 </div>
 <script>
+// six-period host page (?grid=1): builds the six cells, then the chart script below stops itself (window.GRIDMODE)
+(function () {
+  const q = new URLSearchParams(location.search);
+  if (q.has("cell")) document.body.classList.add("cell");
+  if (!q.has("grid")) return;
+  window.GRIDMODE = true; document.body.classList.add("gridmode");
+  const ST = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+  const INS = { qqq: "QQQ", eth: "ETH Perps", btc: "BTC Perps" }, TT = { qqq: "QQQUSDT", eth: "ETH 永续", btc: "BTC 永续" };
+  const GTF = ["3m", "5m", "15m", "30m", "1h", "4h"];
+  let inst = INS[q.get("inst")] ? q.get("inst") : (INS[ST("inst")] ? ST("inst") : "qqq");
+  const sel = document.getElementById("ginst");
+  Object.keys(INS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INS[k]; sel.appendChild(o); });
+  const cells = document.getElementById("gcells"), frames = [];
+  const srcOf = t => { const u = new URLSearchParams(location.search); u.delete("grid"); u.delete("srv"); u.delete("tok"); u.set("inst", inst); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); return location.pathname + "?" + u.toString(); };
+  GTF.forEach(t => { const f = document.createElement("iframe"); f.title = t; cells.appendChild(f); frames.push([t, f]); });
+  const load = () => { frames.forEach(([t, f]) => { f.src = srcOf(t); }); document.title = TT[inst] + " · 6 周期"; sel.value = inst; };
+  sel.onchange = () => { inst = sel.value; ST("inst", inst); load(); };
+  const bb = document.getElementById("gbb"); bb.classList.toggle("on", ST("bb") !== "0");
+  bb.onclick = () => { const on = ST("bb") === "0"; ST("bb", on ? "1" : "0"); bb.classList.toggle("on", on); };   // the cells pick it up from the storage event
+  document.getElementById("gback").onclick = async () => {
+    try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) await pywebview.api.set_grid(false); } catch (e) {}
+    const u = new URL(location.href); u.searchParams.delete("grid"); u.searchParams.set("inst", inst); u.searchParams.set("tf", ST("tf") || "1h"); location.href = u.toString();
+  };
+  load();
+  const ask = () => { try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) pywebview.api.set_grid(true); } catch (e) {} };
+  if (window.pywebview) ask(); else window.addEventListener("pywebviewready", ask);
+})();
+</script>
+<script>
 "use strict";
+if (window.GRIDMODE) throw new Error("grid host page: the cells are separate pages");   // stops this script here (nothing below runs in the host)
 const Q = new URLSearchParams(location.search);
-function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+const CELL = Q.has("cell");
+function store(k, v) { try { if (v !== undefined && CELL) return; if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 const MARKETS = {
   perp: { sym: "QQQUSDT", label: "QQQUSDT 永续", short: "QQQUSDT", tag: "永续", rest: "https://fapi.binance.com/fapi/v1/klines", px: "https://fapi.binance.com/fapi/v1/ticker/price", ws: "wss://fstream.binance.com/market/stream" },
   spot: { sym: "QQQBUSDT", label: "QQQBUSDT 现货", short: "QQQBUSDT", tag: "现货", rest: "https://data-api.binance.vision/api/v3/klines", px: "https://data-api.binance.vision/api/v3/ticker/price", ws: "wss://data-stream.binance.vision/stream" }
@@ -161,11 +209,13 @@ let ws = null, gen = 0, lastMsg = 0, status = "init", pollTimer = null, wd = nul
 Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INSTS[k].label; $("inst").appendChild(o); });
 $("inst").value = inst;
 $("bb").classList.toggle("on", bbOn);
+$("celltf").textContent = TF_TIP[tf];
+$("gridbtn").onclick = () => { const u = new URL(location.href); u.searchParams.set("grid", "1"); u.searchParams.set("inst", inst); u.searchParams.delete("tf"); location.href = u.toString(); };
 TFS.forEach(t => { const b = document.createElement("button"); b.textContent = t; b.dataset.tf = t; b.title = TF_TIP[t]; if (t === tf) b.className = "on"; b.onclick = () => setTf(t); $("tfs").appendChild(b); });
 $("bb").onclick = () => { bbOn = !bbOn; $("bb").classList.toggle("on", bbOn); store("bb", bbOn ? "1" : "0"); render(); };
 window.addEventListener("storage", e => { if (e.key === "bb") { bbOn = e.newValue !== "0"; $("bb").classList.toggle("on", bbOn); render(); } });   // other windows of the app
 function toast(t) { const el = $("toast"); el.textContent = t; el.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = "none", 2500); }
-function reportState() { try { if (window.pywebview && pywebview.api && pywebview.api.set_state) pywebview.api.set_state(inst, tf, INSTS[inst].title); } catch (e) {} }
+function reportState() { if (CELL) return; try { if (window.pywebview && pywebview.api && pywebview.api.set_state) pywebview.api.set_state(inst, tf, INSTS[inst].title); } catch (e) {} }
 function setInst(k) {
   if (!INSTS[k]) return;
   inst = k; store("inst", k); view.off = 0; candles = []; bands = []; ticker = null;
@@ -173,7 +223,7 @@ function setInst(k) {
   $("qpx").style.display = $("ydot").style.display = k === "qqq" ? "" : "none";
   $("px").textContent = "--"; $("px").title = "币安 " + INSTS[k].short + " 最新价";
   document.title = INSTS[k].title;
-  if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
+  if (CELL) { /* no Yahoo, no trading in the six-period cells */ } else if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
   reportState();
   if (!pos && !ord && tInst !== k) { tInst = k; $("tpi").value = k; clampLev(); if (tOpen) { feedStart(k); hints(); } }   // and the panel follows the chart
   start();
@@ -540,7 +590,7 @@ let SRV = null, skew = 0, srvBusy = false, srvOk = null, srvSeen = null;
   if (Q.get("srv")) { store("srv", Q.get("srv")); store("tok", Q.get("tok") || ""); }
   else if (Q.get("tok")) store("tok", Q.get("tok"));
   let u = Q.get("srv") || store("srv") || (SERVED ? location.origin : (store("srv") === null ? "http://100.78.175.68:8765" : ""));
-  if (Q.get("local") != null) u = "";
+  if (Q.get("local") != null || CELL) u = "";
   if (u) SRV = { url: u.replace(/\/+$/, ""), tok: Q.get("tok") || store("tok") || "" };
 })();
 async function api(method, path, body) {
