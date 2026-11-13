@@ -47,10 +47,8 @@
   body.cell #celltf { display:inline; }
   body.cell #inst, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
-  #gridhost { display:none; flex-direction:column; width:100vw; height:100vh; background:var(--bg); }
-  body.gridmode #app, body.gridmode #holder { display:none !important; } body.gridmode #gridhost { display:flex; }
-  #gbar { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); font-size:13px; }
-  #gcells { flex:1; min-height:0; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
+  #gcells { display:none; position:absolute; inset:0; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
+  body.six #gcells { display:grid; } body.six #cv, body.six #msg, body.six #tfs { display:none !important; }
   @media (max-aspect-ratio: 1/1) { #gcells { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(3, minmax(0, 1fr)); } }
   .gc { position:relative; min-width:0; min-height:0; overflow:hidden; background:var(--bg); }
   .gc iframe { position:absolute; left:0; top:0; width:100%; height:100%; border:0; display:block; }   /* sized by the cell, never by the iframe's own height (WebKit let the rows grow past the window) */
@@ -58,10 +56,6 @@
 </head>
 <body>
 <div id="holder" style="display:none;padding:24px;color:#8793a1;font:14px sans-serif">浮窗已打开。关闭浮窗后图表会回到这里。</div>
-<div id="gridhost">
-  <div id="gbar"><button id="gback" title="回到单图窗口">← 单图</button><select id="ginst" title="选择品种"></select><span id="gpx" class="num" title="最新价">--</span><button id="gbb" title="布林线 (20, 2σ) 开/关">BL</button><span class="sp"></span><span class="lb">3m · 5m · 15m · 30m · 1h · 4h</span></div>
-  <div id="gcells"></div>
-</div>
 <div id="app">
   <div id="col">
   <div id="hdr">
@@ -72,12 +66,12 @@
     <span id="celltf"></span>
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
-    <button id="gridbtn" title="六个周期一起看 (3m 5m 15m 30m 1h 4h)">6格</button>
+    <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
   </div>
-  <div id="wrap"><canvas id="cv"></canvas><div id="msg"></div><div id="toast"></div>
+  <div id="wrap"><canvas id="cv"></canvas><div id="gcells"></div><div id="msg"></div><div id="toast"></div>
   </div>
   </div>
   <div id="tp">
@@ -145,38 +139,10 @@
   </div>
 </div>
 <script>
-// six-period host page (?grid=1): builds the six cells, then the chart script below stops itself (window.GRIDMODE)
-(function () {
-  const q = new URLSearchParams(location.search);
-  if (q.has("cell")) document.body.classList.add("cell");
-  if (!q.has("grid")) return;
-  window.GRIDMODE = true; document.body.classList.add("gridmode");
-  const ST = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
-  const INS = { qqq: "QQQ", eth: "ETH Perps", btc: "BTC Perps" }, TT = { qqq: "QQQUSDT", eth: "ETH 永续", btc: "BTC 永续" };
-  const GTF = ["3m", "5m", "15m", "30m", "1h", "4h"];
-  let inst = INS[q.get("inst")] ? q.get("inst") : (INS[ST("inst")] ? ST("inst") : "qqq");
-  const sel = document.getElementById("ginst");
-  Object.keys(INS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INS[k]; sel.appendChild(o); });
-  const cells = document.getElementById("gcells"), frames = [];
-  const srcOf = t => { const u = new URLSearchParams(location.search); u.delete("grid"); u.delete("srv"); u.delete("tok"); u.set("inst", inst); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); return location.pathname + "?" + u.toString(); };
-  window.addEventListener("message", e => { const d = e.data; if (d && d.gridpx != null && d.tf === "3m") document.getElementById("gpx").textContent = d.gridpx; });   // one price for all six cells
-  GTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); cells.appendChild(d); frames.push([t, f]); });
-  const load = () => { frames.forEach(([t, f]) => { f.src = srcOf(t); }); document.title = TT[inst] + " · 6 周期"; sel.value = inst; };
-  sel.onchange = () => { inst = sel.value; ST("inst", inst); load(); };
-  const bb = document.getElementById("gbb"); bb.classList.toggle("on", ST("bb") !== "0");
-  bb.onclick = () => { const on = ST("bb") === "0"; ST("bb", on ? "1" : "0"); bb.classList.toggle("on", on); };   // the cells pick it up from the storage event
-  document.getElementById("gback").onclick = async () => {
-    try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) await pywebview.api.set_grid(false); } catch (e) {}
-    const u = new URL(location.href); u.searchParams.delete("grid"); u.searchParams.set("inst", inst); u.searchParams.set("tf", ST("tf") || "1h"); location.href = u.toString();
-  };
-  load();
-  const ask = () => { try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) pywebview.api.set_grid(true); } catch (e) {} };
-  if (window.pywebview) ask(); else window.addEventListener("pywebviewready", ask);
-})();
+(function () { if (new URLSearchParams(location.search).has("cell")) document.body.classList.add("cell"); })();
 </script>
 <script>
 "use strict";
-if (window.GRIDMODE) throw new Error("grid host page: the cells are separate pages");   // stops this script here (nothing below runs in the host)
 const Q = new URLSearchParams(location.search);
 const CELL = Q.has("cell");
 function store(k, v) { try { if (v !== undefined && CELL) return; if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
@@ -212,7 +178,6 @@ Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.
 $("inst").value = inst;
 $("bb").classList.toggle("on", bbOn);
 $("celltf").textContent = TF_TIP[tf];
-$("gridbtn").onclick = () => { const u = new URL(location.href); u.searchParams.set("grid", "1"); u.searchParams.set("inst", inst); u.searchParams.delete("tf"); location.href = u.toString(); };
 TFS.forEach(t => { const b = document.createElement("button"); b.textContent = t; b.dataset.tf = t; b.title = TF_TIP[t]; if (t === tf) b.className = "on"; b.onclick = () => setTf(t); $("tfs").appendChild(b); });
 $("bb").onclick = () => { bbOn = !bbOn; $("bb").classList.toggle("on", bbOn); store("bb", bbOn ? "1" : "0"); render(); };
 window.addEventListener("storage", e => { if (e.key === "bb") { bbOn = e.newValue !== "0"; $("bb").classList.toggle("on", bbOn); render(); } });   // other windows of the app
@@ -226,7 +191,7 @@ function setInst(k) {
   $("px").textContent = "--"; $("px").title = "币安 " + INSTS[k].short + " 最新价";
   document.title = INSTS[k].title;
   if (CELL) { /* no Yahoo, no trading in the six-period cells */ } else if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
-  reportState();
+  reportState(); if (six) sixLoad();
   if (!pos && !ord && tInst !== k) { tInst = k; $("tpi").value = k; clampLev(); if (tOpen) { feedStart(k); hints(); } }   // and the panel follows the chart
   start();
 }
@@ -243,6 +208,32 @@ function setTf(t) {
   document.querySelectorAll("#tfs button").forEach(b => b.classList.toggle("on", b.dataset.tf === t));
   start();
 }
+
+// ---------- six-period view: six cells (this same page with ?cell=1) inside the chart area; the SIMU panel stays usable ----------
+const SIXTF = ["3m", "5m", "15m", "30m", "1h", "4h"];
+let six = false, sixFrames = [], cellSim = { pos: null, ord: null };
+function sixSrc(t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local"].forEach(k => u.delete(k)); u.set("inst", inst); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); return location.pathname + "?" + u.toString(); }
+function sixLoad() { sixFrames.forEach(([t, f]) => { f.src = six ? sixSrc(t) : "about:blank"; }); }
+function setSix(on) {
+  if (CELL) return;
+  six = on; document.body.classList.toggle("six", on); $("gridbtn").textContent = on ? "Single" : "Six";
+  if (!sixFrames.length) SIXTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gcells").appendChild(d); sixFrames.push([t, f]); });
+  sixLoad();
+  try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) pywebview.api.set_grid(on); } catch (e) {}
+  setTimeout(render, 50);
+}
+function sixPush() {   // the cells have no trading of their own: they get the position / order lines and the Bollinger switch from this page
+  if (!six) return;
+  const m = { simu: { pos: pos || null, ord: ord || null }, bb: bbOn };
+  sixFrames.forEach(([t, f]) => { try { f.contentWindow.postMessage(m, "*"); } catch (e) {} });
+}
+if (CELL) window.addEventListener("message", e => {
+  const d = e.data; if (!d || !d.simu) return;
+  const k = JSON.stringify(d); if (k === sixPush.last) return; sixPush.last = k;
+  cellSim = d.simu; if (bbOn !== d.bb) { bbOn = d.bb; $("bb").classList.toggle("on", bbOn); } render();
+});
+else setInterval(sixPush, 500);
+$("gridbtn").onclick = () => setSix(!six);
 
 // ---------- data ----------
 function parseK(a) { return { t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5] }; }
@@ -454,7 +445,7 @@ function render() {
     for (const [v, col] of [[bb.u, "#5b8cff"], [bb.m, "#e0a030"], [bb.l, "#b07bff"]]) {
       const y = yOf(v);
       ctx.setLineDash([5, 4]); ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, Math.round(y) + 0.5); ctx.lineTo(L + pw, Math.round(y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
-      tags.push({ y, ty: y, col, txt: fmt(v) });
+      if (col !== "#e0a030") tags.push({ y, ty: y, col, txt: fmt(v) });   // the mid line gets no number
     }
   }
   if (end >= candles.length) tags.push({ y: ly, ty: ly, col: lup ? UP : DN, txt: fmt(lc.c) });
@@ -480,7 +471,6 @@ function render() {
   // header: Binance last price (the Yahoo QQQ price is updated by the websocket handler above)
   const px = ticker && Date.now() - tickerAt < 15000 ? ticker.c : lc.c;
   $("px").textContent = fmt(px);
-  if (CELL && window.parent !== window) { const t = fmt(px); if (t !== render.lastPx) { render.lastPx = t; try { window.parent.postMessage({ gridpx: t, tf }, "*"); } catch (e) {} } }
 }
 
 // ---------- interaction ----------
@@ -963,7 +953,8 @@ async function sumDone(keep) {
   $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); }
 
 function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
-  const o = pos && pos.inst === inst ? pos : null, w = !pos && ord && ord.inst === inst ? ord : null;
+  const P = CELL ? cellSim.pos : pos, OD = CELL ? cellSim.ord : ord;
+  const o = P && P.inst === inst ? P : null, w = !P && OD && OD.inst === inst ? OD : null;
   if (!o && !w) return;
   const d = (o ? o.entry : w.price) >= 1000 ? 1 : 2;
   const items = o ? [["入场", o.entry, FG, [6, 3]], ["止盈", o.tp, UP, [2, 3]], ["止损", o.sl, DN, [2, 3]], ["爆仓", o.liq, "#e0a030", [1, 3]]]
@@ -994,6 +985,7 @@ $("tpsok").onclick = async () => {
 srvLabel(); if (SRV) srvSync();
 showView("form"); clampLev();
 setInst(inst);
+if (Q.has("grid")) setSix(true);
 </script>
 </body>
 </html>

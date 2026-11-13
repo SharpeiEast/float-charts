@@ -240,25 +240,25 @@ class App:
             if on == (slot in self.grid):
                 return True
             x, y, w, h = g
+            pw = self.panel.get(slot, 0)                      # the SIMU panel may be open: its width stays on top of the chart width
             if on:
-                w -= self.panel.pop(slot, 0)               # the page was reloaded: its SIMU panel is closed
-                self.grid[slot] = [w, h]
-                nw, nh = max(w, 1500), max(h, 860)
+                self.grid[slot] = [w - pw, h]
+                nw, nh = max(w - pw, 1500), max(h, 860)
                 try:
                     scr = [sc for sc in webview.screens if sc.x <= x < sc.x + sc.width] or list(webview.screens)[:1]
                     if scr:
-                        nw, nh = min(nw, scr[0].width - 40), min(nh, scr[0].height - 80)
-                        nx, ny = max(scr[0].x, min(x, scr[0].x + scr[0].width - nw)), max(scr[0].y, min(y, scr[0].y + scr[0].height - nh - 40))
+                        nw, nh = min(nw, scr[0].width - 40 - pw), min(nh, scr[0].height - 80)
+                        nx, ny = max(scr[0].x, min(x, scr[0].x + scr[0].width - nw - pw)), max(scr[0].y, min(y, scr[0].y + scr[0].height - nh - 40))
                         win.move(nx, ny)
                         g[0], g[1] = nx, ny
                 except Exception:
                     pass
-                win.resize(nw, nh)
-                g[2], g[3] = nw, nh
+                win.resize(nw + pw, nh)
+                g[2], g[3] = nw + pw, nh
             else:
                 w0, h0 = self.grid.pop(slot)
-                win.resize(w0, h0)
-                g[2], g[3] = w0, h0
+                win.resize(w0 + pw, h0)
+                g[2], g[3] = w0 + pw, h0
             log("grid %s slot=%s" % ("on" if on else "off", slot))
             return True
 
