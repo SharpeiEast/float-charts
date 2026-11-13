@@ -12,10 +12,12 @@ Python standard library only.
 API (JSON, header X-Token or ?tok= must match the token file, except /api/ping):
   GET  /api/state?inst=btc          full state + prices (also marks that instrument as watched for a minute)
   POST /api/order        {inst, side, lev, tp, sl, fee, mode: "mkt"|"lmt", price, mins}
-  POST /api/order/edit   {price?, lev?, tp?, sl?, mins?}
-  POST /api/order/cancel
-  POST /api/pos/edit     {tp?, sl?}
-  POST /api/pos/close
+  POST /api/order/edit   {inst, price?, lev?, tp?, sl?, mins?}
+  POST /api/order/cancel {inst}
+  POST /api/pos/edit     {inst, tp?, sl?}
+  POST /api/pos/close    {inst}
+  (one pending order or open position per instrument, up to qqq + eth + btc at the same time; state has "ords" / "poss" keyed by instrument,
+   plus "ord" / "pos" = the first of each for older one-at-a-time clients, whose calls without "inst" apply to that first one)
   POST /api/ack          {keep?, note?} drop the oldest trade summary (the page has shown it); keep=true first appends it to trades.jsonl (next to the state file)
   GET  /api/trades?n=200 the recorded trades (newest last)
 """
@@ -25,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SYM = {"qqq": "QQQUSDT", "eth": "ETHUSDT", "btc": "BTCUSDT"}
 TR = {"qqq": {"max": 25, "mmr": 0.02}, "eth": {"max": 150, "mmr": 0.004}, "btc": {"max": 150, "mmr": 0.004}}
 LABEL = {"qqq": "QQQ", "eth": "ETH", "btc": "BTC"}
+INST_OF = {v: k for k, v in SYM.items()}
 TAKER, MAKER, DEF_EXP = 0.0005, 0.0002, 30
 FAPI = "https://fapi.binance.com"
 TEST = bool(os.environ.get("SIMU_TEST"))
@@ -134,7 +137,7 @@ class Engine:
         self.prices = {}          # sym -> [price, time_ms]
         self.watch = {}           # sym -> watched until (ms)
         self.cur = {}             # sym -> {"id": last aggTrade id seen, "ts": its time}
-        self.st = {"rev": 0, "seq": 0, "ord": None, "pos": None, "sums": [], "cur": {}}
+        self.st = {"rev": 0, "seq": 0, "ords": {}, "poss": {}, "sums": [], "cur": {}}     # ords / poss: inst -> pending order / open position (one of each per instrument, up to three instruments at once)
         self.saved_at = 0
         self.journal = os.path.join(os.path.dirname(os.path.abspath(path)), "trades.jsonl")   # trades the user chose to keep, one JSON per line
         try:
@@ -143,6 +146,10 @@ class Engine:
             self.cur = {k: dict(v) for k, v in self.st.get("cur", {}).items()}
         except (OSError, ValueError):
             pass
+        for old, new in (("pos", "poss"), ("ord", "ords")):         # state file of the one-at-a-time versions
+            o = self.st.pop(old, None)
+            if o and o.get("inst") in SYM:
+                self.st[new][o["inst"]] = o
 
     # -- persistence
     def save(self, force=False):
@@ -162,7 +169,8 @@ class Engine:
         with self.lock:
             if inst in SYM:
                 self.watch[SYM[inst]] = now_ms() + 60000
-            return {"now": now_ms(), "rev": self.st["rev"], "ord": self.st["ord"], "pos": self.st["pos"], "sums": self.st["sums"],
+            first = lambda d: next(iter(d.values()), None)             # "ord" / "pos": what the one-at-a-time clients read
+            return {"now": now_ms(), "rev": self.st["rev"], "ords": self.st["ords"], "poss": self.st["poss"], "ord": first(self.st["ords"]), "pos": first(self.st["poss"]), "sums": self.st["sums"],
                     "prices": {s: {"p": v[0], "t": v[1]} for s, v in self.prices.items()}, "tr": TR}
 
     # -- price handling
@@ -190,8 +198,8 @@ class Engine:
         sym = SYM[inst]
         cur_id = self.net.latest(sym)
         with self.lock:
-            if self.st["pos"] or self.st["ord"]:
-                raise Bad("already have an open position or pending order")
+            if inst in self.st["poss"] or inst in self.st["ords"]:
+                raise Bad("already have an open position or pending order on this instrument")
         cur = self.net.price(sym)
         self.set_price(sym, cur, now_ms())
         base = {"inst": inst, "side": side, "lev": lev, "tp": tp, "sl": sl, "fee": fee}
@@ -216,16 +224,24 @@ class Engine:
                     if not 1 <= mins <= 1440:
                         raise Bad("countdown must be 1 to 1440 minutes")
                 t = now_ms()
-                self.st["ord"] = dict(base, id=self.st["seq"], price=lp, kind=kind_of(side, lp, cur), cur0=cur, mins=mins, t0=t, expAt=int(t + mins * 60000))
+                self.st["ords"][inst] = dict(base, id=self.st["seq"], price=lp, kind=kind_of(side, lp, cur), cur0=cur, mins=mins, t0=t, expAt=int(t + mins * 60000))
                 self.bump()
-                self.check_order(cur, t)           # a limit at the market fills at once
+                self.check_order(inst, cur, t)           # a limit at the market fills at once
             else:
                 self.start_pos(base, cur, TAKER, "市价", now_ms(), notify=False)
         return self.view()
 
+    def pick(self, b, where):
+        """the instrument an edit / cancel / close is about: b["inst"], or (older clients) the only / first one"""
+        inst = (b or {}).get("inst")
+        if inst is None:
+            inst = next(iter(self.st[where]), None)
+        return inst
+
     def edit_order(self, b):
         with self.lock:
-            o = self.st["ord"]
+            inst = self.pick(b, "ords")
+            o = self.st["ords"].get(inst)
             if not o:
                 raise Bad("no pending order")
             sym = SYM[o["inst"]]
@@ -263,31 +279,33 @@ class Engine:
                 n["expAt"] = int(now_ms() + m * 60000)
         cur = self.fresh_price(sym)
         with self.lock:
-            if self.st["ord"] is None or self.st["ord"]["id"] != o["id"]:
+            if self.st["ords"].get(inst) is None or self.st["ords"][inst]["id"] != o["id"]:
                 raise Bad("order changed")
             n["kind"] = kind_of(n["side"], n["price"], cur)
-            self.st["ord"] = n
+            self.st["ords"][inst] = n
             self.bump()
-            self.check_order(cur, now_ms())
+            self.check_order(inst, cur, now_ms())
         return self.view()
 
-    def cancel_order(self):
+    def cancel_order(self, b=None):
         with self.lock:
-            if not self.st["ord"]:
+            inst = self.pick(b, "ords")
+            if inst not in self.st["ords"]:
                 raise Bad("no pending order")
-            self.st["ord"] = None
+            del self.st["ords"][inst]
             self.bump()
         return self.view()
 
     def edit_pos(self, b):
         with self.lock:
-            q = self.st["pos"]
+            inst = self.pick(b, "poss")
+            q = self.st["poss"].get(inst)
             if not q:
                 raise Bad("no open position")
             sym = SYM[q["inst"]]
         p = self.fresh_price(sym)
         with self.lock:
-            q = self.st["pos"]
+            q = self.st["poss"].get(inst)
             if not q:
                 raise Bad("no open position")
             for w in ("tp", "sl"):
@@ -303,16 +321,17 @@ class Engine:
             self.bump()
         return self.view()
 
-    def close_manual(self):
+    def close_manual(self, b=None):
         with self.lock:
-            q = self.st["pos"]
+            inst = self.pick(b, "poss")
+            q = self.st["poss"].get(inst)
             if not q:
                 raise Bad("no open position")
             sym = SYM[q["inst"]]
         p = self.fresh_price(sym)
         with self.lock:
-            if self.st["pos"]:
-                self.close(p, "手动平仓", now_ms(), notify=False)
+            if self.st["poss"].get(inst):
+                self.close(inst, p, "手动平仓", now_ms(), notify=False)
         return self.view()
 
     def ack(self, b=None):
@@ -349,18 +368,18 @@ class Engine:
         q.update(entry=entry, fo=fo, how=how, t0=t, hi=0.0, lo=0.0, last=entry, id=self.st["seq"])
         q["hi"] = q["lo"] = roe_at(entry, q)
         q["liq"] = liq_of(q)
-        self.st["ord"] = None
-        self.st["pos"] = q
+        self.st["ords"].pop(q["inst"], None)
+        self.st["poss"][q["inst"]] = q
         self.bump()
         if notify:                             # a market order the user placed by hand needs no message, a resting limit order that fills does
             self.say(q, f"filled at {fmt(entry)}", f"{fmt(entry)} で約定しました")
 
-    def check_order(self, p, t):
-        o = self.st["ord"]
+    def check_order(self, inst, p, t):
+        o = self.st["ords"].get(inst)
         if not o:
             return
         if t >= o["expAt"]:
-            self.st["ord"] = None
+            del self.st["ords"][inst]
             self.bump()
             return
         k = o["kind"]
@@ -372,9 +391,8 @@ class Engine:
         self.start_pos(o, o["price"] if maker else p, MAKER if maker else TAKER,
                        "限价成交" if maker else ("现价成交" if k == "now" else "突破成交"), t)
 
-    def close(self, px, why, t, notify=True):
-        q = self.st["pos"]
-        self.st["pos"] = None
+    def close(self, inst, px, why, t, notify=True):
+        q = self.st["poss"].pop(inst)
         liq = why == "爆仓"
         roe = -1.0 if liq else roe_at(px, q)
         s = {"why": why, "inst": q["inst"], "side": q["side"], "lev": q["lev"], "how": q["how"], "entry": q["entry"], "px": px, "fee": q["fee"],
@@ -406,11 +424,11 @@ class Engine:
         """one trade price, in time order"""
         with self.lock:
             self.set_price(sym, p, t)
-            o, q = self.st["ord"], self.st["pos"]
-            if o and SYM[o["inst"]] == sym:
-                self.check_order(p, t)
-            q = self.st["pos"]
-            if q and SYM[q["inst"]] == sym:
+            inst = INST_OF.get(sym)
+            if inst in self.st["ords"]:
+                self.check_order(inst, p, t)
+            q = self.st["poss"].get(inst)
+            if q:
                 roe = roe_at(p, q)
                 changed = False
                 if roe > q["hi"]:
@@ -419,11 +437,11 @@ class Engine:
                     q["lo"] = roe
                 q["last"] = p
                 if (p <= q["liq"]) if q["side"] > 0 else (p >= q["liq"]):
-                    self.close(p, "爆仓", t)
+                    self.close(inst, p, "爆仓", t)
                 elif q["tp"] is not None and ((p >= q["tp"]) if q["side"] > 0 else (p <= q["tp"])):
-                    self.close(p, "触发止盈", t)
+                    self.close(inst, p, "触发止盈", t)
                 elif q["sl"] is not None and ((p <= q["sl"]) if q["side"] > 0 else (p >= q["sl"])):
-                    self.close(p, "触发止损", t)
+                    self.close(inst, p, "触发止损", t)
 
     # -- polling
     def poll_agg(self, sym):
@@ -464,11 +482,10 @@ class Engine:
     def step(self):
         t = now_ms()
         with self.lock:
-            o, q = self.st["ord"], self.st["pos"]
-            if o and t >= o["expAt"]:
-                self.st["ord"] = None
+            for k in [k for k, o in self.st["ords"].items() if t >= o["expAt"]]:
+                del self.st["ords"][k]
                 self.bump()
-            active = {SYM[x["inst"]] for x in (self.st["ord"], self.st["pos"]) if x}
+            active = {SYM[x["inst"]] for x in list(self.st["ords"].values()) + list(self.st["poss"].values())}
             watch = {s for s, until in self.watch.items() if until > t} - active
         for sym in active:
             try:
@@ -586,8 +603,8 @@ def make_handler(eng, token, html_path):
                 return self.send(400, {"error": "bad json"})
             try:
                 r = {"/api/order": lambda: eng.place(b), "/api/order/edit": lambda: eng.edit_order(b),
-                     "/api/order/cancel": eng.cancel_order, "/api/pos/edit": lambda: eng.edit_pos(b),
-                     "/api/pos/close": eng.close_manual, "/api/ack": lambda: eng.ack(b)}.get(u.path)
+                     "/api/order/cancel": lambda: eng.cancel_order(b), "/api/pos/edit": lambda: eng.edit_pos(b),
+                     "/api/pos/close": lambda: eng.close_manual(b), "/api/ack": lambda: eng.ack(b)}.get(u.path)
                 if TEST and u.path == "/api/_test/tick":
                     eng.net.push(SYM[b["inst"]], b["p"], b.get("t"))
                     return self.send(200, {"ok": True})

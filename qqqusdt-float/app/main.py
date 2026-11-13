@@ -101,6 +101,16 @@ class SlotApi:
             log("set_server failed:\n" + traceback.format_exc())
             return False
 
+    def set_title(self, text):
+        """The page shows the rotating position summary in the window title (a minimized window still shows it in the task bar)."""
+        try:
+            win = self._app.wins.get(self._slot)
+            if win is not None and text:
+                win.set_title(str(text))
+            return True
+        except Exception:
+            return False
+
     def set_grid(self, on):
         """The page switched to / from the six-period view: enlarge the window for it and restore the old size afterwards."""
         try:
