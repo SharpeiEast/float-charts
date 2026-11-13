@@ -38,6 +38,11 @@
   #tp .go { width:100%; padding:6px 0; margin-top:6px; font-weight:700; border-color:var(--accent); } #tp .go.stop { border-color:var(--dn); }
   #tp .big { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; margin:2px 0 4px; }
   #tp .kv { display:flex; justify-content:space-between; margin:3px 0; } #tp .kv span:first-child { color:var(--muted); }
+  #tp .card { border:1px solid var(--line); border-radius:6px; padding:5px 8px 7px; margin-bottom:8px; } #tp .card.cur { border-color:var(--accent); }
+  #tp .card .ch { display:flex; align-items:center; gap:6px; cursor:pointer; } #tp .card .ch b { font-size:13px; } #tp .card .big { font-size:20px; margin:0 0 2px; } #tp .card .go { margin-top:4px; padding:4px 0; }
+  #tp .card .kv b { font-weight:600; font-variant-numeric:tabular-nums; } #tp .card .r { margin:4px 0; } #tp #tp-form { border-top:1px solid var(--line); padding-top:6px; }
+  #tp .card .cw:empty { display:none; }
+  #tp button:disabled { opacity:0.45; cursor:default; }
   #tp .warn { color:#e0a030; font-size:11px; min-height:14px; margin-top:4px; }
   #tp .two + .two { margin-top:5px; }
   .up { color:var(--up); } .dn { color:var(--dn); }
@@ -77,6 +82,19 @@
   <div id="tp">
     <div class="h"><b>模拟合约</b><span class="sp"></span><span id="tppx" class="lb"></span><button id="tpcfg" title="服务器设置">⚙</button><button id="tpx" title="收起">✕</button></div>
     <div class="hint" id="tpsrv" style="text-align:left;margin:-2px 0 4px 0"></div>
+    <div id="tp-main">
+    <div id="tp-sum" class="card" style="display:none">
+      <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
+      <div class="big" id="sumroe">--</div>
+      <div id="sumrows"></div>
+      <div id="sumrecbox">
+        <input id="sumnote" type="text" maxlength="500" placeholder="复盘备注 (可选)" style="width:100%;box-sizing:border-box;margin-top:8px">
+        <button id="sumrec" class="go">记录到 us01a</button>
+      </div>
+      <button id="sumok" class="go">不记录</button>
+      <div class="warn" id="sumwarn"></div>
+    </div>
+    <div id="tp-cards"></div>
     <div id="tp-form">
       <div class="r"><span class="k">品种</span><select id="tpi" style="flex:1"></select></div>
       <div class="r"><span class="k">杠杆</span><input type="range" id="tplv" min="1" max="25" step="1" value="10"><input type="number" id="tplvn" min="1" max="25" step="1" value="10" style="flex:none;width:46px"><span>x</span></div>
@@ -90,31 +108,6 @@
       <button id="tpgo" class="go">开仓 (按现价)</button>
       <div class="warn" id="tpwarn"></div>
     </div>
-    <div id="tp-pos" style="display:none">
-      <div class="kv"><span id="tpdesc"></span><span id="tpdur"></span></div>
-      <div class="big" id="tproe">--</div>
-      <div class="kv"><span>开仓价</span><span id="tpent"></span></div>
-      <div class="kv"><span>现价</span><span id="tpnow"></span></div>
-      <div class="kv"><span>爆仓价</span><span id="tpliq"></span></div>
-      <div class="r"><span class="k">止盈价</span><input type="text" id="tptp2" placeholder="无" inputmode="decimal"></div>
-      <div class="r"><span class="k">止损价</span><input type="text" id="tpsl2" placeholder="无" inputmode="decimal"></div>
-      <div class="warn" id="tpwarn2"></div>
-      <button id="tpend" class="go stop">平仓</button>
-    </div>
-    <div id="tp-ord" style="display:none">
-      <div class="kv"><span id="tpodesc"></span></div>
-      <div class="kv"><span>委托倒计时</span><span id="tpocd"></span></div>
-      <div class="big" id="tpobig">--</div>
-      <div class="kv"><span>现价</span><span id="tpopx"></span></div>
-      <div class="kv"><span>距离限价</span><span id="tpodist"></span></div>
-      <div class="r"><span class="k">限价</span><input type="text" id="tpoprice" inputmode="decimal"><span class="hint" id="tpokind"></span></div>
-      <div class="r"><span class="k">杠杆</span><input type="number" id="tpolev" min="1" step="1"><span>x</span></div>
-      <div class="r"><span class="k">止盈价</span><input type="text" id="tpotp" placeholder="无" inputmode="decimal"></div>
-      <div class="r"><span class="k">止损价</span><input type="text" id="tposl" placeholder="无" inputmode="decimal"></div>
-      <div class="r"><span class="k">倒计时</span><input type="number" id="tpomin" min="1" max="1440" step="1"><span>分钟</span></div>
-      <div class="hint" style="text-align:left;margin:-2px 0 2px 0">修改后按回车或点别处生效; 改倒计时 = 从现在起重新计时</div>
-      <div class="warn" id="tpowarn"></div>
-      <button id="tpocancel" class="go stop">撤单</button>
     </div>
     <div id="tp-set" style="display:none">
       <div class="kv"><b>服务器设置</b></div>
@@ -124,17 +117,6 @@
       <button id="tpsok" class="go">保存并连接</button>
       <button id="tpsback" class="go" style="border-color:var(--line)">返回</button>
       <div class="warn" id="tpswarn"></div>
-    </div>
-    <div id="tp-sum" style="display:none">
-      <div class="kv"><b>交易总结</b><span id="sumwhy"></span></div>
-      <div class="big" id="sumroe">--</div>
-      <div id="sumrows"></div>
-      <div id="sumrecbox">
-        <input id="sumnote" type="text" maxlength="500" placeholder="复盘备注 (可选)" style="width:100%;box-sizing:border-box;margin-top:8px">
-        <button id="sumrec" class="go">记录到 us01a, 再来一单</button>
-      </div>
-      <button id="sumok" class="go">不记录, 再来一单</button>
-      <div class="warn" id="sumwarn"></div>
     </div>
   </div>
 </div>
@@ -646,31 +628,14 @@ function srvApply(st) {
   const sym = SSYM[watchInst()], pr = st.prices[sym];
   feed.sym = sym;
   if (pr) { feed.price = pr.p; feed.at = Date.now() - Math.max(0, st.now - pr.t); }
-  const np = POS[tInst] || null, op = pos;
-  pos = np ? Object.assign({}, np, { last: feed.price != null ? feed.price : np.last }) : null;
-  if (np) {
-    if (!op || op.id !== np.id) posUI();
-    else {
-      if (!typing("tptp2")) $("tptp2").value = np.tp ? np.tp : "";
-      if (!typing("tpsl2")) $("tpsl2").value = np.sl ? np.sl : "";
-      warnLiq();
-    }
-  }
-  const oo = ord;
+  pos = POS[tInst] ? Object.assign({}, POS[tInst], { last: feed.price != null ? feed.price : POS[tInst].last }) : null;     // pos / ord: the chart instrument's, for the lines on the chart
   ord = ORD[tInst] ? Object.assign({}, ORD[tInst]) : null;
-  if (ord && !pos && (!oo || oo.id !== ord.id)) { syncOrd(); ordInfo(); }
-  else if (ord && oo && !sameJ(oo, ord) && !["tpoprice", "tpolev", "tpotp", "tposl", "tpomin"].some(typing)) { syncOrd(); ordInfo(); }
   const sm = st.sums[0];
   if (sm) {
     const key = sm.at + ":" + sm.why;
     if (srvSeen !== key) { srvSeen = key; renderSummary(sm); }
-  } else {
-    srvSeen = null;
-    if (pos) { if (curView !== "pos") showView("pos"); }
-    else if (ord) { if (curView !== "ord") { showView("ord"); } }
-    else if (curView === "pos" || curView === "ord" || curView === "sum") showView("form");
-  }
-  btnRefresh(); orderUI(); updateTrade(); scheduleRender();
+  } else { srvSeen = null; $("tp-sum").style.display = "none"; }
+  btnRefresh(); updateTrade(); scheduleRender();
 }
 async function srvDo(path, body, onErr) {
   try { const st = await api("POST", path, Object.assign({ inst: tInst }, body)); srvOk = true; srvApply(st); srvLabel(); return true; }
@@ -704,46 +669,6 @@ function feedTick(p) { if (!(p > 0)) return; feed.price = p; feed.at = Date.now(
 window.__tick = p => feedTick(p);            // test hook (mock mode)
 const fresh = () => feed.price != null && Date.now() - feed.at < 12000;
 
-function updateTrade() {
-  const p = feed.price, d = p != null && p >= 1000 ? 1 : 2;
-  $("tppx").textContent = p == null ? "等待行情…" : (fresh() ? "" : "行情过期 ") + fmt(p, d);
-  if (pos && p != null) {
-    pos.last = p;
-    const roe = roeAt(p, pos);
-    pos.hi = Math.max(pos.hi, roe); pos.lo = Math.min(pos.lo, roe);
-    if (!SRV) {
-      const hitLiq = pos.side > 0 ? p <= pos.liq : p >= pos.liq;
-      if (hitLiq) { closePos("爆仓", p); return; }
-      if (pos.tp != null && (pos.side > 0 ? p >= pos.tp : p <= pos.tp)) { closePos("触发止盈", p); return; }
-      if (pos.sl != null && (pos.side > 0 ? p <= pos.sl : p >= pos.sl)) { closePos("触发止损", p); return; }
-    }
-    const e = $("tproe"); e.textContent = pc(roe); e.className = "big " + (roe >= 0 ? "up" : "dn");
-    $("tpnow").textContent = fmt(p, d); $("tpdur").textContent = dur(Date.now() + skew - pos.t0);
-    scheduleRender();
-  }
-  if (ord && p != null && !SRV) checkOrder(p);
-  if (!pos && !ord) hints();
-}
-function hints() {
-  const cur = feed.price; if (cur == null) return;
-  let p = cur, fo = TAKER;
-  const lp = pnum($("tplp"));
-  if (tMode === "lmt") {
-    const h = $("tplph");
-    if (lp) { const k = kindOf(tSide, lp, cur); p = lp; fo = k === "limit" ? MAKER : TAKER; h.textContent = (lp > cur ? "+" : "") + ((lp / cur - 1) * 100).toFixed(2) + "%" + (k === "stop" ? " 突破" : ""); h.className = "hint"; }
-    else { h.textContent = ""; }
-  }
-  const q = { inst: tInst, side: tSide, lev: +$("tplvn").value || 1, entry: p, fee: $("tpfee").checked, fo };
-  const one = (el, hint, kind) => {
-    const v = pnum(el); const h = $(hint);
-    if (!v) { h.textContent = ""; h.className = "hint"; return; }
-    const ok = kind === "tp" ? (tSide > 0 ? v > p : v < p) : (tSide > 0 ? v < p : v > p);
-    if (!ok) { h.textContent = (tSide > 0 === (kind === "tp") ? "须高于" : "须低于") + (tMode === "lmt" ? "限价" : "现价"); h.className = "hint dn"; return; }
-    const r = roeAt(v, q); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up" : "dn");
-  };
-  one($("tptp"), "tptph", "tp"); one($("tpsl"), "tpslh", "sl");
-  const lq = liqOf(q); $("tpwarn").textContent = (tMode === "lmt" && lp ? "成交后" : "") + "爆仓价约 " + fmt(lq, p >= 1000 ? 1 : 2) + (q.lev >= 100 ? "  (高杠杆极易爆仓)" : "");
-}
 // the SIMU button (and the window title, which a minimized window still shows in the task bar) rotates every 3 s through every open position / pending order
 const SHORT = { qqq: "QQQ", eth: "ETH", btc: "BTC" };
 function simList() {
@@ -766,10 +691,56 @@ function btnRefresh() {
   b.textContent = txt; b.className = e.ord ? "" : e.roe >= 0 ? "pos" : "neg";
   setWinTitle(txt + (l.length > 1 ? "  (" + l.length + ")" : ""));
 }
-setInterval(btnRefresh, 1000);
-let curView = "form";
-function showView(v) {
-  $("tp-form").style.display = v === "form" ? "" : "none"; $("tp-pos").style.display = v === "pos" ? "" : "none"; $("tp-sum").style.display = v === "sum" ? "" : "none"; $("tp-ord").style.display = v === "ord" ? "" : "none"; $("tp-set").style.display = v === "set" ? "" : "none"; curView = v;
+const INST_KEYS = Object.keys(INSTS);
+const getPos = k => SRV ? (POS[k] || null) : (pos && pos.inst === k ? pos : null);
+const getOrd = k => SRV ? (ORD[k] || null) : (ord && ord.inst === k ? ord : null);
+const priceOf = (k, q) => { if (SRV) { const v = PR[SSYM[k]]; return v ? v.p : (q ? q.last : null); } return feed.price != null && k === tInst ? feed.price : (q ? q.last : null); };
+
+function updateTrade() {
+  const p = feed.price, d = p != null && p >= 1000 ? 1 : 2;
+  $("tppx").textContent = p == null ? "等待行情…" : (fresh() ? "" : "行情过期 ") + fmt(p, d);
+  if (!SRV) {                                  // local mode: this page watches the price itself (one position or order at a time)
+    if (pos && p != null) {
+      pos.last = p;
+      const roe = roeAt(p, pos);
+      pos.hi = Math.max(pos.hi, roe); pos.lo = Math.min(pos.lo, roe);
+      const hitLiq = pos.side > 0 ? p <= pos.liq : p >= pos.liq;
+      if (hitLiq) { closePos("爆仓", p); return; }
+      if (pos.tp != null && (pos.side > 0 ? p >= pos.tp : p <= pos.tp)) { closePos("触发止盈", p); return; }
+      if (pos.sl != null && (pos.side > 0 ? p <= pos.sl : p >= pos.sl)) { closePos("触发止损", p); return; }
+      scheduleRender();
+    }
+    if (ord && p != null) checkOrder(p);
+  }
+  renderCards(); hints();
+}
+function hints() {
+  const busy = SRV ? (POS[tInst] || ORD[tInst]) : (pos || ord);
+  $("tpgo").disabled = !!busy;
+  if (busy) { $("tpwarn").textContent = SRV ? INSTS[tInst].label + " 已有" + (POS[tInst] ? "持仓" : "挂单") + ", 换一个品种再开一单" : "本地模式一次只能一单"; return; }
+  const cur = feed.price; if (cur == null) return;
+  let p = cur, fo = TAKER;
+  const lp = pnum($("tplp"));
+  if (tMode === "lmt") {
+    const h = $("tplph");
+    if (lp) { const k = kindOf(tSide, lp, cur); p = lp; fo = k === "limit" ? MAKER : TAKER; h.textContent = (lp > cur ? "+" : "") + ((lp / cur - 1) * 100).toFixed(2) + "%" + (k === "stop" ? " 突破" : ""); h.className = "hint"; }
+    else { h.textContent = ""; }
+  }
+  const q = { inst: tInst, side: tSide, lev: +$("tplvn").value || 1, entry: p, fee: $("tpfee").checked, fo };
+  const one = (el, hint, kind) => {
+    const v = pnum(el); const h = $(hint);
+    if (!v) { h.textContent = ""; h.className = "hint"; return; }
+    const ok = kind === "tp" ? (tSide > 0 ? v > p : v < p) : (tSide > 0 ? v < p : v > p);
+    if (!ok) { h.textContent = (tSide > 0 === (kind === "tp") ? "须高于" : "须低于") + (tMode === "lmt" ? "限价" : "现价"); h.className = "hint dn"; return; }
+    const r = roeAt(v, q); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up" : "dn");
+  };
+  one($("tptp"), "tptph", "tp"); one($("tpsl"), "tpslh", "sl");
+  const lq = liqOf(q); $("tpwarn").textContent = (tMode === "lmt" && lp ? "成交后" : "") + "爆仓价约 " + fmt(lq, p >= 1000 ? 1 : 2) + (q.lev >= 100 ? "  (高杠杆极易爆仓)" : "");
+}
+let curView = "main";
+function showView(v) {                    // "set" = server settings replace the panel body; anything else = positions + new-order form
+  curView = v === "set" ? "set" : "main";
+  $("tp-main").style.display = curView === "main" ? "" : "none"; $("tp-set").style.display = curView === "set" ? "" : "none";
 }
 // where a limit price sits relative to the market: "limit" = resting order on the better side (fills at the limit price, maker),
 // "stop" = price must first run through the level (fills at the tick that reaches it, taker), "now" = exactly at the market
@@ -784,7 +755,7 @@ function setTrade(open) {
   tOpen = open; $("tp").classList.toggle("open", open);
   if (open !== was) { try { if (window.pywebview && pywebview.api && pywebview.api.set_panel) pywebview.api.set_panel(open, PANEL_W); } catch (e) {} }
   setTimeout(render, 30);
-  if (open) { if (!pos && !ord) { tInst = inst; $("tpi").value = tInst; clampLev(); } feedStart(!SRV && pos ? pos.inst : !SRV && ord ? ord.inst : tInst); updateTrade(); }
+  if (open) { if (SRV || (!pos && !ord)) { tInst = inst; $("tpi").value = tInst; clampLev(); } feedStart(!SRV && pos ? pos.inst : !SRV && ord ? ord.inst : tInst); updateTrade(); }
   else if (!pos && !ord) feedStop();
 }
 $("tbtn").onclick = () => setTrade(!tOpen);
@@ -806,28 +777,23 @@ function setMode(m) {
 $("tpmkt").onclick = () => setMode("mkt");
 $("tplmt").onclick = () => setMode("lmt");
 
-function startPos(o, entry, fo, how) {
+function startPos(o, entry, fo, how) {            // local mode
   pos = { inst: o.inst, side: o.side, lev: o.lev, entry, tp: o.tp, sl: o.sl, fee: o.fee, fo, how, t0: Date.now(), hi: -Infinity, lo: Infinity, last: entry };
   pos.liq = liqOf(pos);
-  posUI();
-}
-function posUI() {
-  const entry = pos.entry, o = pos, d = entry >= 1000 ? 1 : 2;
-  $("tpdesc").textContent = INSTS[pos.inst].label + " " + sideName(pos.side) + " " + pos.lev + "x";
-  $("tpent").textContent = fmt(entry, d); $("tpliq").textContent = fmt(pos.liq, d);
-  $("tptp2").value = o.tp ? o.tp : ""; $("tpsl2").value = o.sl ? o.sl : ""; $("tpwarn2").textContent = "";
-  warnLiq();
-  showView("pos"); updateTrade();
+  $("tptp").value = $("tpsl").value = "";
+  updateTrade();
 }
 $("tpgo").onclick = () => {
+  if (SRV ? (POS[tInst] || ORD[tInst]) : (pos || ord)) { hints(); return; }
   if (!fresh()) { $("tpwarn").textContent = "还没有收到最新行情, 请稍等"; return; }
   const cur = feed.price, tp = pnum($("tptp")), sl = pnum($("tpsl"));
   const lev = Math.max(1, Math.min(TR[tInst].max, Math.round(+$("tplvn").value || 1)));
   const base = { inst: tInst, side: tSide, lev, tp, sl, fee: $("tpfee").checked };
+  const done = ok => { if (ok) $("tptp").value = $("tpsl").value = ""; };
   if (tMode === "mkt") {
     if (tp && (tSide > 0 ? tp <= cur : tp >= cur)) { $("tpwarn").textContent = "止盈价设置不合理"; return; }
     if (sl && (tSide > 0 ? sl >= cur : sl <= cur)) { $("tpwarn").textContent = "止损价设置不合理"; return; }
-    if (SRV) { srvDo("/api/order", Object.assign({ mode: "mkt" }, base)); return; }
+    if (SRV) { srvDo("/api/order", Object.assign({ mode: "mkt" }, base)).then(done); return; }
     startPos(base, cur, TAKER, "市价");
     return;
   }
@@ -838,14 +804,11 @@ $("tpgo").onclick = () => {
   if ($("tpexp").value.trim() !== "") { mins = Number($("tpexp").value); if (!(mins >= 1 && mins <= 1440)) { $("tpwarn").textContent = "有效期需在 1 到 1440 分钟之间"; return; } }
   if (tp && (tSide > 0 ? tp <= lp : tp >= lp)) { $("tpwarn").textContent = "止盈价设置不合理 (相对限价)"; return; }
   if (sl && (tSide > 0 ? sl >= lp : sl <= lp)) { $("tpwarn").textContent = "止损价设置不合理 (相对限价)"; return; }
-  if (SRV) { srvDo("/api/order", Object.assign({ mode: "lmt", price: lp, mins }, base)); return; }
+  if (SRV) { srvDo("/api/order", Object.assign({ mode: "lmt", price: lp, mins }, base)).then(done); return; }
   ord = Object.assign(base, { price: lp, kind: kindOf(tSide, lp, cur), cur0: cur, mins, t0: Date.now(), expAt: Date.now() + mins * 60000 });
-  const d = lp >= 1000 ? 1 : 2;
-  $("tpodesc").textContent = INSTS[ord.inst].label + " " + sideName(ord.side) + " " + ord.lev + "x";
-  syncOrd(); ordInfo();
-  showView("ord"); orderUI(); updateTrade(); scheduleRender();
+  done(true); updateTrade(); scheduleRender();
 };
-// pending order: reached -> becomes a position; countdown over -> cancelled
+// pending order (local mode): reached -> becomes a position; countdown over -> cancelled
 function checkOrder(p) {
   if (!ord) return;
   const hit = ord.kind === "now" || (ord.side > 0 ? (ord.kind === "limit" ? p <= ord.price : p >= ord.price) : (ord.kind === "limit" ? p >= ord.price : p <= ord.price));
@@ -853,103 +816,128 @@ function checkOrder(p) {
   const o = ord; ord = null;
   const maker = o.kind === "limit";
   const entry = maker ? o.price : p;
-  btnRefresh();
   toast("限价单已成交 " + fmt(entry, entry >= 1000 ? 1 : 2));
   startPos(o, entry, maker ? MAKER : TAKER, maker ? "限价成交" : o.kind === "now" ? "现价成交" : "突破成交");
 }
-function orderUI() {
-  if (!ord) return;
-  if (!SRV && Date.now() >= ord.expAt) {
+setInterval(() => {
+  if (!SRV && ord && Date.now() >= ord.expAt) {
     const o = ord; ord = null;
-    btnRefresh();
-    showView("form"); $("tpwarn").textContent = "限价委托已超时撤销: " + o.mins + " 分钟内价格没有到 " + fmt(o.price, o.price >= 1000 ? 1 : 2);
+    $("tpwarn").textContent = "限价委托已超时撤销: " + o.mins + " 分钟内价格没有到 " + fmt(o.price, o.price >= 1000 ? 1 : 2);
     toast("限价委托已超时撤销"); if (!pos && !tOpen) feedStop(); scheduleRender();
-    return;
   }
-  const left = Math.max(0, Math.round((ord.expAt - Date.now() - skew) / 1000)), mm = pad2(Math.floor(left / 60)) + ":" + pad2(left % 60);
-  $("tpobig").textContent = mm; $("tpocd").textContent = "共 " + ord.mins + " 分钟";
-  const p = feed.price, d = ord.price >= 1000 ? 1 : 2;
-  if (p != null) { $("tpopx").textContent = fmt(p, d); const dist = (ord.price / p - 1) * 100; $("tpodist").textContent = (dist >= 0 ? "+" : "") + dist.toFixed(2) + "%"; }
-}
-setInterval(() => { if (ord) orderUI(); }, 1000);
-const odec = () => ord && ord.price >= 1000 ? 1 : 2;
-function syncOrd() {                    // put the order's values into the editable fields
-  if (!ord) return;
-  $("tpoprice").value = fmt(ord.price, odec()); $("tpolev").value = ord.lev; $("tpotp").value = ord.tp ? ord.tp : ""; $("tposl").value = ord.sl ? ord.sl : ""; $("tpomin").value = ord.mins;
-}
-function ordInfo(msg) {
-  if (!ord) return;
-  const o = ord, lq = liqOf({ inst: o.inst, side: o.side, lev: o.lev, entry: o.price, fee: o.fee, fo: o.kind === "limit" ? MAKER : TAKER });
-  $("tpokind").textContent = o.kind === "stop" ? "突破" : o.kind === "limit" ? "回落/反弹" : "现价";
-  $("tpowarn").textContent = msg || ("成交后爆仓价约 " + fmt(lq, odec()) + ", 超时自动撤单");
-  $("tpowarn").style.color = msg ? "var(--dn)" : "";
-}
-function ordBad(msg) { syncOrd(); ordInfo(msg); }
-$("tpoprice").onchange = () => {
-  if (!ord) return;
-  const v = pnum($("tpoprice")); if (!v) return ordBad("限价无效");
-  const o = ord;
-  if (SRV) return srvDo("/api/order/edit", { price: v }, ordBad);
-  if (o.tp && (o.side > 0 ? o.tp <= v : o.tp >= v)) return ordBad("新限价与止盈价冲突, 请先改止盈价");
-  if (o.sl && (o.side > 0 ? o.sl >= v : o.sl <= v)) return ordBad("新限价与止损价冲突, 请先改止损价");
-  o.price = v; if (feed.price != null) o.kind = kindOf(o.side, v, feed.price);
-  syncOrd(); ordInfo(); orderUI(); scheduleRender(); if (feed.price != null) checkOrder(feed.price);
-};
-$("tpolev").onchange = () => {
-  if (!ord) return;
-  const mx = TR[ord.inst].max, v = Math.round(Number($("tpolev").value));
-  if (!(v >= 1)) return ordBad("杠杆至少 1 倍");
-  if (SRV) return srvDo("/api/order/edit", { lev: v }, m => ordBad(m));
-  ord.lev = Math.min(mx, v); syncOrd(); ordInfo(v > mx ? "最大杠杆 " + mx + "x, 已改为 " + mx + "x" : undefined);
-};
-const editOrdLevel = which => {
-  if (!ord) return;
-  const el = which === "tp" ? $("tpotp") : $("tposl"), v = pnum(el);
-  if (SRV) return srvDo("/api/order/edit", { [which]: el.value.trim() === "" ? null : el.value }, ordBad);
-  if (el.value.trim() === "") { ord[which] = null; syncOrd(); ordInfo(); scheduleRender(); return; }
-  const ok = v && (which === "tp" ? (ord.side > 0 ? v > ord.price : v < ord.price) : (ord.side > 0 ? v < ord.price : v > ord.price));
-  if (!ok) return ordBad((which === "tp" ? "止盈" : "止损") + "价需在限价" + ((which === "tp") === (ord.side > 0) ? "上方" : "下方"));
-  ord[which] = v; syncOrd(); ordInfo(); scheduleRender();
-};
-$("tpotp").onchange = () => editOrdLevel("tp");
-$("tposl").onchange = () => editOrdLevel("sl");
-$("tpomin").onchange = () => {
-  if (!ord) return;
-  const m = Number($("tpomin").value); if (!(m >= 1 && m <= 1440)) return ordBad("倒计时需在 1 到 1440 分钟之间");
-  if (SRV) return srvDo("/api/order/edit", { mins: m }, ordBad);
-  ord.mins = m; ord.expAt = Date.now() + m * 60000; syncOrd(); ordInfo(); orderUI();
-};
-$("tpocancel").onclick = () => {
-  if (!ord) return;
-  if (SRV) { srvDo("/api/order/cancel", {}, m => ordBad(m)); return; }
-  ord = null; btnRefresh();
-  showView("form"); $("tpwarn").textContent = "已撤单"; if (!pos && !tOpen) feedStop(); scheduleRender();
-};
-function warnLiq() {
-  if (!pos) return;
-  const bad = (pos.sl != null && (pos.side > 0 ? pos.sl <= pos.liq : pos.sl >= pos.liq));
-  $("tpwarn2").textContent = bad ? "止损价在爆仓价之外, 会先爆仓" : "";
-}
-function editLevel(which) {
-  if (!pos) return;
-  const el = which === "tp" ? $("tptp2") : $("tpsl2"), v = pnum(el), p = feed.price;
-  if (SRV) return void srvDo("/api/pos/edit", { [which]: el.value.trim() === "" ? null : el.value }, m => { $("tpwarn2").textContent = m; });
-  if (el.value.trim() === "") { pos[which] = null; warnLiq(); scheduleRender(); return; }
-  const ok = v && (which === "tp" ? (pos.side > 0 ? v > p : v < p) : (pos.side > 0 ? v < p : v > p));
-  if (!ok) { $("tpwarn2").textContent = (which === "tp" ? "止盈" : "止损") + "价需在现价" + ((which === "tp") === (pos.side > 0) ? "上方" : "下方"); return; }
-  pos[which] = v; warnLiq(); scheduleRender();
-}
-$("tptp2").onchange = () => editLevel("tp");
-$("tpsl2").onchange = () => editLevel("sl");
-$("tpend").onclick = () => { if (SRV) { if (pos) srvDo("/api/pos/close", {}, m => { $("tpwarn2").textContent = m; }); return; } if (pos) closePos("手动平仓", feed.price != null ? feed.price : pos.last); };
+  if (tOpen) renderCards();
+  btnRefresh();
+}, 1000);
 
-function closePos(why, px) {
+// ---------- the panel: one card per open position / pending order (oldest on top), the new-order form below ----------
+const CARD_POS = '<div class="ch"><b class="cd"></b><span class="sp"></span><span class="lb cdur"></span></div><div class="big croe">--</div>' +
+  '<div class="kv"><span>开仓 <b class="cent"></b></span><span>现价 <b class="cnow"></b></span></div><div class="kv"><span>爆仓价</span><b class="cliq"></b></div>' +
+  '<div class="r"><span class="k">止盈</span><input class="ptp" type="text" placeholder="无" inputmode="decimal"><span class="k" style="width:auto">止损</span><input class="psl" type="text" placeholder="无" inputmode="decimal"></div>' +
+  '<div class="warn cw"></div><button class="go stop pend">平仓</button>';
+const CARD_ORD = '<div class="ch"><b class="cd"></b><span class="sp"></span><span class="lb cot"></span></div>' +
+  '<div class="kv"><span>现价 <b class="onow"></b></span><span>距离限价 <b class="odist"></b></span></div>' +
+  '<div class="r"><span class="k">限价</span><input class="oprice" type="text" inputmode="decimal"><span class="hint okind"></span></div>' +
+  '<div class="r"><span class="k">杠杆</span><input class="olev" type="number" min="1" step="1"><span>x</span><span class="k" style="width:auto">倒计时</span><input class="omin" type="number" min="1" max="1440" step="1"><span>分</span></div>' +
+  '<div class="r"><span class="k">止盈</span><input class="otp" type="text" placeholder="无" inputmode="decimal"><span class="k" style="width:auto">止损</span><input class="osl" type="text" placeholder="无" inputmode="decimal"></div>' +
+  '<div class="warn cw"></div><button class="go stop cancel">撤单</button>';
+const setVal = (el, v) => { if (document.activeElement !== el && el.value !== String(v)) el.value = v; };
+function renderCards() {
+  const box = $("tp-cards");
+  const items = INST_KEYS.map(k => ({ k, q: getPos(k), o: getOrd(k) })).filter(x => x.q || x.o).sort((a, b) => ((a.q || a.o).t0 || 0) - ((b.q || b.o).t0 || 0));
+  for (const c of [...box.children]) {
+    const x = items.find(i => i.k === c.dataset.inst), item = x && (x.q || x.o);
+    if (!x || c.dataset.kind !== (x.q ? "pos" : "ord") || c.dataset.id !== String(item.id)) c.remove();
+  }
+  items.forEach((x, idx) => {
+    let c = box.querySelector('[data-inst="' + x.k + '"]');
+    if (!c) { c = document.createElement("div"); c.className = "card"; c.dataset.inst = x.k; c.dataset.kind = x.q ? "pos" : "ord"; c.dataset.id = String((x.q || x.o).id); c.innerHTML = x.q ? CARD_POS : CARD_ORD; }
+    if (box.children[idx] !== c) box.insertBefore(c, box.children[idx] || null);
+    c.classList.toggle("cur", x.k === inst);
+    x.q ? updPosCard(c, x.k, x.q) : updOrdCard(c, x.k, x.o);
+  });
+  Array.from($("tpi").options).forEach(o => { o.textContent = INSTS[o.value].label + (getPos(o.value) || getOrd(o.value) ? " ●" : ""); });
+}
+function updPosCard(c, k, q) {
+  const px = priceOf(k, q), d = q.entry >= 1000 ? 1 : 2, $c = s => c.querySelector(s);
+  $c(".cd").textContent = INSTS[k].label + " " + sideName(q.side) + " " + q.lev + "x";
+  if (px != null) { const roe = roeAt(px, q), e = $c(".croe"); e.textContent = pc(roe); e.className = "big croe " + (roe >= 0 ? "up" : "dn"); $c(".cnow").textContent = fmt(px, d); }
+  $c(".cent").textContent = fmt(q.entry, d); $c(".cliq").textContent = fmt(q.liq, d);
+  $c(".cdur").textContent = dur(Date.now() + skew - q.t0);
+  setVal($c(".ptp"), q.tp ? q.tp : ""); setVal($c(".psl"), q.sl ? q.sl : "");
+  const bad = q.sl != null && (q.side > 0 ? q.sl <= q.liq : q.sl >= q.liq), w = $c(".cw");
+  w.textContent = c._msg || (bad ? "止损价在爆仓价之外, 会先爆仓" : ""); w.style.color = c._msg ? "var(--dn)" : "";
+}
+function updOrdCard(c, k, o) {
+  const px = priceOf(k, null), d = o.price >= 1000 ? 1 : 2, $c = s => c.querySelector(s);
+  $c(".cd").textContent = INSTS[k].label + " " + sideName(o.side) + " " + o.lev + "x";
+  const left = Math.max(0, Math.round((o.expAt - Date.now() - skew) / 1000));
+  $c(".cot").textContent = "挂单 " + pad2(Math.floor(left / 60)) + ":" + pad2(left % 60);
+  if (px != null) { $c(".onow").textContent = fmt(px, d); const dist = (o.price / px - 1) * 100; $c(".odist").textContent = (dist >= 0 ? "+" : "") + dist.toFixed(2) + "%"; }
+  $c(".okind").textContent = o.kind === "stop" ? "突破" : o.kind === "limit" ? "回落/反弹" : "现价";
+  setVal($c(".oprice"), fmt(o.price, d)); setVal($c(".olev"), o.lev); setVal($c(".omin"), o.mins); setVal($c(".otp"), o.tp ? o.tp : ""); setVal($c(".osl"), o.sl ? o.sl : "");
+  const lq = liqOf({ inst: k, side: o.side, lev: o.lev, entry: o.price, fee: o.fee, fo: o.kind === "limit" ? MAKER : TAKER }), w = $c(".cw");
+  w.textContent = c._msg || ("成交后爆仓价约 " + fmt(lq, d) + ", 超时自动撤单"); w.style.color = c._msg ? "var(--dn)" : "";
+}
+const cardOf = el => el.closest(".card");
+function cardMsg(c, m) { c._msg = m || ""; renderCards(); }
+function editLevel(c, which, el) {              // take-profit / stop-loss of an open position
+  const k = c.dataset.inst, q = getPos(k); if (!q) return;
+  const v = pnum(el), p = priceOf(k, q);
+  if (SRV) return void srvDo("/api/pos/edit", { inst: k, [which]: el.value.trim() === "" ? null : el.value }, m => cardMsg(c, m)).then(ok => ok && cardMsg(c, ""));
+  if (el.value.trim() === "") { q[which] = null; cardMsg(c, ""); scheduleRender(); return; }
+  const ok = v && (which === "tp" ? (q.side > 0 ? v > p : v < p) : (q.side > 0 ? v < p : v > p));
+  if (!ok) { cardMsg(c, (which === "tp" ? "止盈" : "止损") + "价需在现价" + ((which === "tp") === (q.side > 0) ? "上方" : "下方")); return; }
+  q[which] = v; cardMsg(c, ""); scheduleRender();
+}
+function editOrder(c, field, el) {              // limit price / leverage / take-profit / stop-loss / countdown of a pending order
+  const k = c.dataset.inst, o = getOrd(k); if (!o) return;
+  const bad = m => { c._msg = m; c.querySelector(".cw").textContent = m; c.querySelector(".cw").style.color = "var(--dn)"; setTimeout(() => { c._msg = ""; }, 4000); };
+  const body = { inst: k };
+  if (field === "price") { const v = pnum(el); if (!v) return bad("限价无效"); body.price = v; }
+  else if (field === "lev") { const v = Math.round(Number(el.value)); if (!(v >= 1)) return bad("杠杆至少 1 倍"); body.lev = v; }
+  else if (field === "mins") { const m = Number(el.value); if (!(m >= 1 && m <= 1440)) return bad("倒计时需在 1 到 1440 分钟之间"); body.mins = m; }
+  else body[field] = el.value.trim() === "" ? null : el.value;
+  if (SRV) return void srvDo("/api/order/edit", body, bad).then(ok => ok && cardMsg(c, ""));
+  if (field === "price") {
+    const v = body.price;
+    if (o.tp && (o.side > 0 ? o.tp <= v : o.tp >= v)) return bad("新限价与止盈价冲突, 请先改止盈价");
+    if (o.sl && (o.side > 0 ? o.sl >= v : o.sl <= v)) return bad("新限价与止损价冲突, 请先改止损价");
+    o.price = v; if (feed.price != null) o.kind = kindOf(o.side, v, feed.price);
+  } else if (field === "lev") { const mx = TR[o.inst].max; o.lev = Math.min(mx, body.lev); if (body.lev > mx) bad("最大杠杆 " + mx + "x, 已改为 " + mx + "x"); }
+  else if (field === "mins") { o.mins = body.mins; o.expAt = Date.now() + body.mins * 60000; }
+  else {
+    const v = pnum(el);
+    if (el.value.trim() === "") o[field] = null;
+    else {
+      const ok = v && (field === "tp" ? (o.side > 0 ? v > o.price : v < o.price) : (o.side > 0 ? v < o.price : v > o.price));
+      if (!ok) return bad((field === "tp" ? "止盈" : "止损") + "价需在限价" + ((field === "tp") === (o.side > 0) ? "上方" : "下方"));
+      o[field] = v;
+    }
+  }
+  renderCards(); scheduleRender(); if (feed.price != null) checkOrder(feed.price);
+}
+$("tp-cards").addEventListener("change", e => {
+  const c = cardOf(e.target), cl = e.target.classList; if (!c) return;
+  if (cl.contains("ptp")) editLevel(c, "tp", e.target); else if (cl.contains("psl")) editLevel(c, "sl", e.target);
+  else if (cl.contains("oprice")) editOrder(c, "price", e.target); else if (cl.contains("olev")) editOrder(c, "lev", e.target);
+  else if (cl.contains("omin")) editOrder(c, "mins", e.target); else if (cl.contains("otp")) editOrder(c, "tp", e.target); else if (cl.contains("osl")) editOrder(c, "sl", e.target);
+});
+$("tp-cards").addEventListener("click", e => {
+  const c = cardOf(e.target); if (!c) return;
+  const k = c.dataset.inst, cl = e.target.classList;
+  if (cl.contains("pend")) { if (SRV) srvDo("/api/pos/close", { inst: k }, m => cardMsg(c, m)); else { const q = getPos(k); if (q) closePos("手动平仓", feed.price != null ? feed.price : q.last); } }
+  else if (cl.contains("cancel")) { if (SRV) srvDo("/api/order/cancel", { inst: k }, m => cardMsg(c, m)); else { ord = null; if (!pos && !tOpen) feedStop(); renderCards(); scheduleRender(); } }
+  else if (e.target.closest(".ch") && k !== inst) setInst(k);        // click a card's title: show that instrument's chart
+});
+
+function closePos(why, px) {                    // local mode
   const q = pos; pos = null;
   const liq = why === "爆仓";
   const roe = liq ? -1 : roeAt(px, q);
   renderSummary({ why, inst: q.inst, side: q.side, lev: q.lev, how: q.how, entry: q.entry, px, fee: q.fee, roe, liq,
     move: q.side * (px / q.entry - 1), fees: liq || !q.fee ? 0 : -q.lev * (foOf(q) + TAKER * px / q.entry),
     dur: Date.now() - q.t0, hi: Math.max(q.hi, roe), lo: Math.min(q.lo, roe) });
+  renderCards(); scheduleRender();
 }
 function renderSummary(s) {
   const q = s, why = s.why, px = s.px, liq = s.liq, roe = s.roe, move = s.move, fees = s.fees;
@@ -965,16 +953,17 @@ function renderSummary(s) {
     row("持仓时长", dur(s.dur)) +
     row("期间最高 / 最低收益", '<span class="up">' + pc(s.hi) + '</span> / <span class="dn">' + pc(s.lo) + "</span>") +
     (liq ? row("说明", "保证金亏光, 本金全损") : "");
-  btnRefresh();
-  $("sumrecbox").style.display = SRV ? "" : "none"; $("sumok").textContent = SRV ? "不记录, 再来一单" : "确定, 再来一单";
+  $("sumrecbox").style.display = SRV ? "" : "none"; $("sumok").textContent = SRV ? "不记录" : "确定";
   $("sumnote").value = ""; $("sumwarn").textContent = "";
-  showView("sum"); setTrade(true); scheduleRender();
+  $("tp-sum").style.display = ""; showView("main"); setTrade(true); $("tp").scrollTop = 0; btnRefresh(); scheduleRender();
 }
 $("sumrec").onclick = () => sumDone(true);
 $("sumok").onclick = () => sumDone(false);
 async function sumDone(keep) {
   if (SRV) { srvSeen = null; try { srvApply(await api("POST", "/api/ack", keep ? { keep: true, note: $("sumnote").value.trim() } : {})); } catch (e) { $("sumwarn").textContent = keep ? "记录失败: 服务器连不上或写入出错, 这次总结还在, 可重试" : "服务器连不上"; return; } }
-  $("tptp").value = $("tpsl").value = ""; showView("form"); tInst = inst; $("tpi").value = tInst; clampLev(); feedStart(tInst); hints(); if (!tOpen) feedStop(); }
+  if (!SRV || !LASTST || !LASTST.sums.length) $("tp-sum").style.display = "none";
+  hints(); renderCards();
+}
 
 function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
   const P = CELL ? cellSim.pos : pos, OD = CELL ? cellSim.ord : ord;
@@ -992,9 +981,8 @@ function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
     ctx.fillStyle = col; ctx.fillText(name + " " + fmt(v, d), L + 4, y - 2);
   }
 }
-$("tpcfg").onclick = () => { $("tpsurl").value = SRV ? SRV.url : ""; $("tpstok").value = SRV ? SRV.tok : ""; $("tpswarn").textContent = ""; prevView = curView === "set" ? prevView : curView; showView("set"); setTrade(true); };
-let prevView = "form";
-$("tpsback").onclick = () => showView(pos ? "pos" : ord ? "ord" : prevView === "set" ? "form" : prevView);
+$("tpcfg").onclick = () => { $("tpsurl").value = SRV ? SRV.url : ""; $("tpstok").value = SRV ? SRV.tok : ""; $("tpswarn").textContent = ""; showView("set"); setTrade(true); };
+$("tpsback").onclick = () => showView("main");
 $("tpsok").onclick = async () => {
   const url = $("tpsurl").value.trim().replace(/\/+$/, ""), tok = $("tpstok").value.trim();
   if (url) {
@@ -1007,7 +995,7 @@ $("tpsok").onclick = async () => {
   location.href = u.toString();
 };
 srvLabel(); if (SRV) srvSync();
-showView("form"); clampLev();
+showView("main"); clampLev();
 setInst(inst);
 if (Q.has("grid")) setSix(true);
 </script>

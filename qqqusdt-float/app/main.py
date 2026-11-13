@@ -359,8 +359,8 @@ def run_selftest(app, result_path):
     js("document.getElementById('tpput').click()")
     js("document.getElementById('tpgo').click()")
     time.sleep(2)
-    out["simu_trade"]["opened"] = js("JSON.stringify([document.getElementById('tp-pos').style.display, document.getElementById('tpdesc').textContent, document.getElementById('tpwarn').textContent, document.getElementById('tproe').textContent])")
-    js("document.getElementById('tpend').click()")
+    out["simu_trade"]["opened"] = js("JSON.stringify([document.querySelectorAll('#tp-cards .card').length, document.querySelector('#tp-cards .cd').textContent, document.getElementById('tpwarn').textContent, document.querySelector('#tp-cards .croe').textContent])")
+    js("document.querySelector('#tp-cards .pend').click()")
     time.sleep(1)
     out["simu_trade"]["summary"] = js("JSON.stringify([document.getElementById('tp-sum').style.display, document.getElementById('sumwhy').textContent, document.getElementById('sumroe').textContent])")
     js("document.getElementById('sumok').click()")
@@ -368,7 +368,7 @@ def run_selftest(app, result_path):
         try:
             js("document.getElementById('tpbuy').click(); document.getElementById('tpsl').value='95'; document.getElementById('tpgo').click()")
             time.sleep(3)
-            out["srv_auto"] = {"opened": js("document.getElementById('tpdesc').textContent")}
+            out["srv_auto"] = {"opened": js("document.querySelector('#tp-cards .cd').textContent")}
             tick("qqq", 94.0)
             time.sleep(4)
             out["srv_auto"]["summary"] = js("JSON.stringify([document.getElementById('tp-sum').style.display, document.getElementById('sumwhy').textContent, document.getElementById('sumroe').textContent])")
