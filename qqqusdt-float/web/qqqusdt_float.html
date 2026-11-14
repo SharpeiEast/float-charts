@@ -53,6 +53,8 @@
   body.cell #inst, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
   #gcells { display:none; position:absolute; inset:0; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
+  #bibtn { display:none; } body.six #bibtn { display:inline-block; } body.cell #bibtn { display:none !important; }
+  body.bi #gcells { grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); }   /* Bi Coin: BTC 1h 1d 1w on top, ETH below, in every window shape */
   body.six #gcells { display:grid; } body.six #cv, body.six #msg, body.six #tfs { display:none !important; }
   @media (max-aspect-ratio: 1/1) { #gcells { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(3, minmax(0, 1fr)); } }
   .gc { position:relative; min-width:0; min-height:0; overflow:hidden; background:var(--bg); }
@@ -72,6 +74,7 @@
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
     <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
+    <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1h / 1d / 1w">Bi Coin</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
@@ -159,7 +162,7 @@ let ws = null, gen = 0, lastMsg = 0, status = "init", pollTimer = null, wd = nul
 Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INSTS[k].label; $("inst").appendChild(o); });
 $("inst").value = inst;
 $("bb").classList.toggle("on", bbOn);
-$("celltf").textContent = TF_TIP[tf];
+$("celltf").textContent = (Q.has("bi") ? ({ btc: "BTC", eth: "ETH" }[inst] || "") + " · " : "") + TF_TIP[tf];
 TFS.forEach(t => { const b = document.createElement("button"); b.textContent = t; b.dataset.tf = t; b.title = TF_TIP[t]; if (t === tf) b.className = "on"; b.onclick = () => setTf(t); $("tfs").appendChild(b); });
 $("bb").onclick = () => { bbOn = !bbOn; $("bb").classList.toggle("on", bbOn); store("bb", bbOn ? "1" : "0"); render(); };
 window.addEventListener("storage", e => { if (e.key === "bb") { bbOn = e.newValue !== "0"; $("bb").classList.toggle("on", bbOn); render(); } });   // other windows of the app
@@ -173,7 +176,8 @@ function setInst(k) {
   $("px").textContent = "--"; $("px").title = "币安 " + INSTS[k].short + " 最新价";
   document.title = INSTS[k].title; btnRefresh.title = null;
   if (CELL) { /* no Yahoo, no trading in the six-period cells */ } else if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
-  reportState(); btnRefresh(); if (six) sixLoad();
+  reportState(); btnRefresh();
+  if (six) { if (bi && k === "qqq") setBi(false); else if (!bi) sixLoad(); }          // Bi Coin keeps its two coins whichever of BTC / ETH is picked; QQQ goes back to QQQ's six periods
   if ((SRV || (!pos && !ord)) && tInst !== k) { tInst = k; $("tpi").value = k; clampLev(); if (SRV && LASTST) srvApply(LASTST); if (tOpen) { feedStart(k); hints(); } }   // and the panel follows the chart (each instrument keeps its own position / order)
   start();
 }
@@ -193,21 +197,31 @@ function setTf(t) {
 
 // ---------- six-period view: six cells (this same page with ?cell=1) inside the chart area; the SIMU panel stays usable ----------
 const SIXTF = ["3m", "5m", "15m", "30m", "1h", "4h"];
-let six = false, sixFrames = [], cellSim = { pos: null, ord: null };
-function sixSrc(t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local"].forEach(k => u.delete(k)); u.set("inst", inst); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); return location.pathname + "?" + u.toString(); }
-function sixLoad() { sixFrames.forEach(([t, f]) => { f.src = six ? sixSrc(t) : "about:blank"; }); }
+let six = false, sixFrames = [], cellSim = { poss: {}, ords: {} };
+let bi = false;
+const BI_CELLS = [["btc", "1h"], ["btc", "1d"], ["btc", "1w"], ["eth", "1h"], ["eth", "1d"], ["eth", "1w"]];
+function sixSrc(i, t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local", "bi"].forEach(k => u.delete(k)); u.set("inst", i); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); if (bi) u.set("bi", "1"); return location.pathname + "?" + u.toString(); }
+function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (bi ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : sixSrc(inst, SIXTF[n])) : "about:blank"; }); }
+function setBi(on) {
+  if (CELL || bi === on) return;
+  bi = on; document.body.classList.toggle("bi", on); $("bibtn").classList.toggle("on", on);
+  if (on && inst === "qqq") { bi = on; setInst("btc"); }     // the drop-down on the left must show a coin that is on screen
+  sixLoad();
+}
+$("bibtn").onclick = () => setBi(!bi);
 function setSix(on) {
   if (CELL) return;
+  if (!on && bi) { bi = false; document.body.classList.remove("bi"); $("bibtn").classList.remove("on"); }
   six = on; document.body.classList.toggle("six", on); $("gridbtn").textContent = on ? "Single" : "Six";
-  if (!sixFrames.length) SIXTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gcells").appendChild(d); sixFrames.push([t, f]); });
+  if (!sixFrames.length) SIXTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gcells").appendChild(d); sixFrames.push(f); });
   sixLoad();
   try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) pywebview.api.set_grid(on); } catch (e) {}
   setTimeout(render, 50);
 }
 function sixPush() {   // the cells have no trading of their own: they get the position / order lines and the Bollinger switch from this page
   if (!six) return;
-  const m = { simu: { pos: pos || null, ord: ord || null }, bb: bbOn };
-  sixFrames.forEach(([t, f]) => { try { f.contentWindow.postMessage(m, "*"); } catch (e) {} });
+  const m = { simu: { poss: SRV ? POS : (pos ? { [pos.inst]: pos } : {}), ords: SRV ? ORD : (ord ? { [ord.inst]: ord } : {}) }, bb: bbOn };      // every instrument's lines: the Bi Coin cells show two coins
+  sixFrames.forEach(f => { try { f.contentWindow.postMessage(m, "*"); } catch (e) {} });
 }
 if (CELL) window.addEventListener("message", e => {
   const d = e.data; if (!d || !d.simu) return;
@@ -985,7 +999,7 @@ async function sumDone(keep) {
 }
 
 function drawPos(UP, DN, FG, MUT, yOf, L, pw, T, ph) {
-  const P = CELL ? cellSim.pos : pos, OD = CELL ? cellSim.ord : ord;
+  const P = CELL ? (cellSim.poss[inst] || null) : pos, OD = CELL ? (cellSim.ords[inst] || null) : ord;
   const o = P && P.inst === inst ? P : null, w = !P && OD && OD.inst === inst ? OD : null;
   if (!o && !w) return;
   const d = (o ? o.entry : w.price) >= 1000 ? 1 : 2;
