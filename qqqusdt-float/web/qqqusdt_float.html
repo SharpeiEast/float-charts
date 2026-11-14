@@ -190,7 +190,7 @@ function setInst(k) {
   if (CELL) { /* the six-period cells take Yahoo candles from the parent page, no Yahoo price stream, no trading */ } else if (INSTS[k].yahoo) { if (!yws && !MOCK) connectYahoo(); showQqq(); } else { stopYahoo(); }
   reportState(); btnRefresh();
   if (six) { if (bi && INSTS[k].yahoo) setBi(false); else if (!bi) sixLoad(); }          // Bi Coin keeps its two coins whichever of BTC / ETH is picked; QQQ goes back to QQQ's six periods
-  if ((SRV || (!pos && !ord)) && tInst !== k) { tInst = k; $("tpi").value = k; clampLev(); if (SRV && LASTST) srvApply(LASTST); if (tOpen) { feedStart(k); hints(); } }   // and the panel follows the chart (each instrument keeps its own position / order)
+  if ((SRV || (!pos && !ord)) && tInst !== k) { tInst = k; $("tpi").value = k; useLev(); if (SRV && LASTST) srvApply(LASTST); if (tOpen) { feedStart(k); hints(); } }   // and the panel follows the chart (each instrument keeps its own position / order)
   start();
 }
 $("inst").onchange = () => setInst($("inst").value);
@@ -875,23 +875,25 @@ function showView(v) {                    // "set" = server settings replace the
 // where a limit price sits relative to the market: "limit" = resting order on the better side (fills at the limit price, maker),
 // "stop" = price must first run through the level (fills at the tick that reaches it, taker), "now" = exactly at the market
 const kindOf = (side, lim, cur) => lim === cur ? "now" : ((side > 0) === (lim < cur) ? "limit" : "stop");
+const DEF_LEV = { tqqq: 1 }, levMem = {};      // leverage the new-order form starts with per instrument (10 unless listed here); what you set last for an instrument is remembered while the window is open
 function clampLev() {
   const mx = TR[tInst].max; $("tplv").max = mx; $("tplvn").max = mx;
-  let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v;
+  let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v; levMem[tInst] = v;
 }
+function useLev() { $("tplvn").value = levMem[tInst] != null ? levMem[tInst] : (DEF_LEV[tInst] || 10); clampLev(); }
 const PANEL_W = 250;
 function setTrade(open) {
   const was = tOpen;
   tOpen = open; $("tp").classList.toggle("open", open);
   if (open !== was) { try { if (window.pywebview && pywebview.api && pywebview.api.set_panel) pywebview.api.set_panel(open, PANEL_W); } catch (e) {} }
   setTimeout(render, 30);
-  if (open) { if (SRV || (!pos && !ord)) { tInst = inst; $("tpi").value = tInst; clampLev(); } feedStart(!SRV && pos ? pos.inst : !SRV && ord ? ord.inst : tInst); updateTrade(); }
+  if (open) { if (SRV || (!pos && !ord)) { tInst = inst; $("tpi").value = tInst; useLev(); } feedStart(!SRV && pos ? pos.inst : !SRV && ord ? ord.inst : tInst); updateTrade(); }
   else if (!pos && !ord) feedStop();
 }
 $("tbtn").onclick = () => setTrade(!tOpen);
 $("tpx").onclick = () => setTrade(false);
-$("tpi").onchange = () => { tInst = $("tpi").value; clampLev(); feedStart(tInst); hints(); if (tInst !== inst) setInst(tInst); };   // the chart follows the instrument picked in the panel
-$("tplv").oninput = () => { $("tplvn").value = $("tplv").value; hints(); };
+$("tpi").onchange = () => { tInst = $("tpi").value; useLev(); feedStart(tInst); hints(); if (tInst !== inst) setInst(tInst); };   // the chart follows the instrument picked in the panel
+$("tplv").oninput = () => { $("tplvn").value = $("tplv").value; levMem[tInst] = +$("tplv").value; hints(); };
 $("tplvn").oninput = () => { if ($("tplvn").value !== "") { clampLev(); hints(); } };
 $("tplvn").onchange = () => { clampLev(); hints(); };
 $("tpbuy").onclick = () => { tSide = 1; $("tpbuy").classList.add("on"); $("tpput").classList.remove("on"); hints(); };
@@ -1144,7 +1146,7 @@ $("tpsok").onclick = async () => {
   location.href = u.toString();
 };
 srvLabel(); if (SRV) srvSync();
-showView("main"); clampLev();
+showView("main"); useLev();
 setInst(inst);
 if (Q.has("grid")) setSix(true);
 </script>
