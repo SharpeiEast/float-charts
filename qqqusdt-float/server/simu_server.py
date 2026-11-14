@@ -20,13 +20,14 @@ API (JSON, header X-Token or ?tok= must match the token file, except /api/ping):
    plus "ord" / "pos" = the first of each for older one-at-a-time clients, whose calls without "inst" apply to that first one)
   POST /api/ack          {keep?, note?} drop the oldest trade summary (the page has shown it); keep=true first appends it to trades.jsonl (next to the state file)
   GET  /api/trades?n=200 the recorded trades (newest last)
+  GET  /api/yahoo?sym=QQQ&interval=1m&range=1d&includePrePost=true   Yahoo Finance chart JSON for the page (QQQ / TQQQ "Yahoo" data source)
 """
 import argparse, hmac, ipaddress, json, os, secrets, subprocess, sys, threading, time, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-SYM = {"qqq": "QQQUSDT", "eth": "ETHUSDT", "btc": "BTCUSDT"}
-TR = {"qqq": {"max": 25, "mmr": 0.02}, "eth": {"max": 150, "mmr": 0.004}, "btc": {"max": 150, "mmr": 0.004}}
-LABEL = {"qqq": "QQQ", "eth": "ETH", "btc": "BTC"}
+SYM = {"qqq": "QQQUSDT", "tqqq": "TQQQUSDT", "btc": "BTCUSDT", "eth": "ETHUSDT"}
+TR = {"qqq": {"max": 25, "mmr": 0.02}, "tqqq": {"max": 20, "mmr": 0.025}, "eth": {"max": 150, "mmr": 0.004}, "btc": {"max": 150, "mmr": 0.004}}
+LABEL = {"qqq": "QQQ", "tqqq": "TQQQ", "eth": "ETH", "btc": "BTC"}
 INST_OF = {v: k for k, v in SYM.items()}
 TAKER, MAKER, DEF_EXP = 0.0005, 0.0002, 30
 FAPI = "https://fapi.binance.com"
@@ -530,6 +531,35 @@ def bark(text):
 
 
 # ---------------------------------------------------------------- HTTP
+_ycache = {}
+_ylock = threading.Lock()
+
+
+def yahoo_chart(sym, q):
+    """GET https://query1.finance.yahoo.com/v8/finance/chart/<sym> with whitelisted parameters; answers cached for 8 s (several windows ask the same thing)."""
+    import re
+    if not re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        raise ValueError("sym")
+    iv, rg = (q.get("interval") or [""])[0], (q.get("range") or [""])[0]
+    if not re.fullmatch(r"\d{1,2}(m|h)|\d{1,2}(d|wk|mo)", iv) or not re.fullmatch(r"\d{1,2}(d|mo|y)", rg):
+        raise ValueError("params")
+    pp = (q.get("includePrePost") or ["false"])[0] == "true"
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=%s&range=%s&includePrePost=%s" % (sym, iv, rg, "true" if pp else "false")
+    now = time.time()
+    with _ylock:
+        hit = _ycache.get(url)
+        if hit and now - hit[0] < 8:
+            return hit[1]
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        body = r.read()
+    with _ylock:
+        _ycache[url] = (now, body)
+        for k in [k for k, v in _ycache.items() if now - v[0] > 120]:
+            del _ycache[k]
+    return body
+
+
 def make_handler(eng, token, html_path):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -582,6 +612,13 @@ def make_handler(eng, token, html_path):
                 return self.send(200, {"ok": True, "now": now_ms()})
             if not self.authed(q):
                 return self.send(401, {"error": "bad token"})
+            if u.path == "/api/yahoo":                 # Yahoo Finance chart data for the page (the browser cannot call Yahoo directly: no CORS headers)
+                try:
+                    return self.send(200, yahoo_chart((q.get("sym") or [""])[0], q), "application/json")
+                except ValueError:
+                    return self.send(400, {"error": "bad request"})
+                except Exception as e:
+                    return self.send(502, {"error": "yahoo: " + repr(e)[:120]})
             if u.path == "/api/state":
                 return self.send(200, eng.view((q.get("inst") or [None])[0]))
             if u.path == "/api/trades":

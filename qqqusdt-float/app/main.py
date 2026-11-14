@@ -25,7 +25,7 @@ DEFAULT_SRV = "http://100.78.175.68:8765"      # SIMU server (Tailscale address)
 CFG_VER = 2           # version 2: the default period is 1h (older saved periods are reset once)
 DEFAULT = {"width": 560, "height": 360, "x": 80, "y": 40, "slots": [{"inst": "qqq", "tf": DEFAULT_TF}], "srv": DEFAULT_SRV, "tok": ""}   # srv / tok: SIMU server address (pre-filled) and token; srv "" = local mode
 GAP = 30 if sys.platform == "darwin" else 4          # title-bar allowance between stacked windows
-TITLES = {"qqq": "QQQUSDT", "eth": "ETH 永续", "btc": "BTC 永续"}
+TITLES = {"qqq": "QQQUSDT", "tqqq": "TQQQUSDT", "eth": "ETH 永续", "btc": "BTC 永续"}
 
 
 def resource(rel):
@@ -110,6 +110,16 @@ class SlotApi:
             return True
         except Exception:
             return False
+
+    def yahoo(self, sym, query):
+        """Yahoo Finance chart JSON for the page (QQQ / TQQQ with the Yahoo data source): the page cannot call Yahoo itself, there are no CORS headers."""
+        import re
+        sym, query = str(sym), str(query)
+        if not re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym) or not re.fullmatch(r"interval=[0-9a-z]{2,4}&range=[0-9a-z]{2,4}(&includePrePost=true)?", query):
+            raise ValueError("bad Yahoo request")
+        req = urllib.request.Request("https://query1.finance.yahoo.com/v8/finance/chart/%s?%s" % (sym, query), headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read().decode("utf-8", "replace")
 
     def set_grid(self, on):
         """The page switched to / from the six-period view: enlarge the window for it and restore the old size afterwards."""

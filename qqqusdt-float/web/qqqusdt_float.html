@@ -50,7 +50,7 @@
   /* six-period view: ?grid=1 is the host (one window, six iframes); every cell is this same page with ?cell=1 */
   #celltf { display:none; font-weight:700; color:var(--accent); }
   body.cell #celltf { display:inline; }
-  body.cell #inst, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
+  body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
   #gcells { display:none; position:absolute; inset:0; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
   #bibtn { display:none; } body.six #bibtn { display:inline-block; } body.cell #bibtn { display:none !important; }
@@ -67,12 +67,14 @@
   <div id="col">
   <div id="hdr">
     <select id="inst" title="选择品种"></select>
-    <span id="qpx" class="num" title="Yahoo QQQ (含盘前盘后/夜盘)">--</span><span id="ydot" title="Yahoo 推送状态"></span>
+    <select id="src" title="QQQ / TQQQ 的数据来源: Binance 永续合约 或 Yahoo Finance" style="display:none"><option value="binance">Binance</option><option value="yahoo">Yahoo</option></select>
+    <span id="qpx" class="num" title="Yahoo 报价 (含盘前盘后/夜盘)">--</span><span id="ydot" title="Yahoo 推送状态"></span>
     <span id="px" class="num" title="最新价">--</span><span id="dot" title="连接状态"></span>
     <span class="sp"></span>
     <span id="celltf"></span>
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
+    <button id="emabtn" title="EMA (20) 开/关">EMA</button>
     <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
     <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1h / 1d / 1w">Bi Coin</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
@@ -139,12 +141,15 @@ const BN = MARKETS[Q.get("market")] || MARKETS.perp;
 const MAX_WINS = 3;
 // selectable instruments, all on Binance (QQQUSDT also shows the Yahoo QQQ price next to it); with ?market=spot the spot symbols are used
 const SPOT = BN === MARKETS.spot;
-const INSTS = {
-  qqq: { label: "QQQ", sym: BN.sym, short: BN.short, title: "QQQUSDT" },
-  eth: { label: "ETH Perps", sym: "ETHUSDT", short: "ETHUSDT", title: "ETH 永续" },
-  btc: { label: "BTC Perps", sym: "BTCUSDT", short: "BTCUSDT", title: "BTC 永续" }
+const INSTS = {      // drop-down order; "yahoo" = the symbol on Yahoo Finance (QQQ and TQQQ can show Yahoo or Binance data)
+  qqq: { label: "QQQ", sym: BN.sym, short: BN.short, title: "QQQUSDT", yahoo: "QQQ" },
+  tqqq: { label: "TQQQ", sym: SPOT ? "TQQQBUSDT" : "TQQQUSDT", short: SPOT ? "TQQQBUSDT" : "TQQQUSDT", title: "TQQQUSDT", yahoo: "TQQQ" },
+  btc: { label: "BTC Perps", sym: "BTCUSDT", short: "BTCUSDT", title: "BTC 永续" },
+  eth: { label: "ETH Perps", sym: "ETHUSDT", short: "ETHUSDT", title: "ETH 永续" }
 };
 let inst = INSTS[Q.get("inst")] ? Q.get("inst") : (INSTS[store("inst")] ? store("inst") : "qqq");
+const srcOf = k => !INSTS[k].yahoo ? "binance" : ((CELL ? Q.get("src") : store("src_" + k)) === "yahoo" ? "yahoo" : "binance");     // which data the page shows for QQQ / TQQQ
+let dsrc = srcOf(inst);
 const MK = BN;   // Binance endpoints (perpetual or spot)
 const MOCK = Q.has("mock");
 const TFS = ["3m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"];
@@ -156,32 +161,45 @@ const app = $("app"), cv = $("cv"), ctx = cv.getContext("2d");
 
 let tf = TFS.includes(Q.get("tf")) ? Q.get("tf") : (TFS.includes(store("tf")) ? store("tf") : "1h");
 let bbOn = store("bb") !== "0";
+const NE = 20;                                // EMA period
+let emaOn = store("ema") === "1", emas = [];
 let candles = [], bands = [], ticker = null, tickerAt = 0, view = { n: 90, off: 0 }, hover = null;
 let ws = null, gen = 0, lastMsg = 0, status = "init", pollTimer = null, wd = null;
 
 Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = INSTS[k].label; $("inst").appendChild(o); });
 $("inst").value = inst;
-$("bb").classList.toggle("on", bbOn);
-$("celltf").textContent = (Q.has("bi") ? ({ btc: "BTC", eth: "ETH" }[inst] || "") + " · " : "") + TF_TIP[tf];
+$("bb").classList.toggle("on", bbOn); $("emabtn").classList.toggle("on", emaOn);
+$("celltf").textContent = (Q.has("bi") ? ({ btc: "BTC", eth: "ETH" }[inst] || "") + " · " : INSTS[inst].yahoo && dsrc === "yahoo" ? "Yahoo · " : "") + TF_TIP[tf];
 TFS.forEach(t => { const b = document.createElement("button"); b.textContent = t; b.dataset.tf = t; b.title = TF_TIP[t]; if (t === tf) b.className = "on"; b.onclick = () => setTf(t); $("tfs").appendChild(b); });
 $("bb").onclick = () => { bbOn = !bbOn; $("bb").classList.toggle("on", bbOn); store("bb", bbOn ? "1" : "0"); render(); };
-window.addEventListener("storage", e => { if (e.key === "bb") { bbOn = e.newValue !== "0"; $("bb").classList.toggle("on", bbOn); render(); } });   // other windows of the app
+$("emabtn").onclick = () => { emaOn = !emaOn; $("emabtn").classList.toggle("on", emaOn); store("ema", emaOn ? "1" : "0"); render(); };
+window.addEventListener("storage", e => {
+  if (e.key === "bb") { bbOn = e.newValue !== "0"; $("bb").classList.toggle("on", bbOn); render(); }
+  if (e.key === "ema") { emaOn = e.newValue === "1"; $("emabtn").classList.toggle("on", emaOn); render(); }
+});   // other windows of the app
 function toast(t) { const el = $("toast"); el.textContent = t; el.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = "none", 2500); }
 function reportState() { if (CELL) return; try { if (window.pywebview && pywebview.api && pywebview.api.set_state) pywebview.api.set_state(inst, tf, btnRefresh.title || INSTS[inst].title); } catch (e) {} }
 function setInst(k) {
   if (!INSTS[k]) return;
   inst = k; store("inst", k); view.off = 0; candles = []; bands = []; ticker = null;
+  dsrc = srcOf(k); $("src").value = dsrc; $("src").style.display = INSTS[k].yahoo && !CELL ? "" : "none";
   $("inst").value = k;
-  $("qpx").style.display = $("ydot").style.display = k === "qqq" ? "" : "none";
+  $("qpx").style.display = $("ydot").style.display = INSTS[k].yahoo ? "" : "none";
   $("px").textContent = "--"; $("px").title = "币安 " + INSTS[k].short + " 最新价";
   document.title = INSTS[k].title; btnRefresh.title = null;
-  if (CELL) { /* no Yahoo, no trading in the six-period cells */ } else if (k === "qqq") { if (!yws && !MOCK) connectYahoo(); } else { stopYahoo(); }
+  if (CELL) { /* the six-period cells take Yahoo candles from the parent page, no Yahoo price stream, no trading */ } else if (INSTS[k].yahoo) { if (!yws && !MOCK) connectYahoo(); showQqq(); } else { stopYahoo(); }
   reportState(); btnRefresh();
-  if (six) { if (bi && k === "qqq") setBi(false); else if (!bi) sixLoad(); }          // Bi Coin keeps its two coins whichever of BTC / ETH is picked; QQQ goes back to QQQ's six periods
+  if (six) { if (bi && INSTS[k].yahoo) setBi(false); else if (!bi) sixLoad(); }          // Bi Coin keeps its two coins whichever of BTC / ETH is picked; QQQ goes back to QQQ's six periods
   if ((SRV || (!pos && !ord)) && tInst !== k) { tInst = k; $("tpi").value = k; clampLev(); if (SRV && LASTST) srvApply(LASTST); if (tOpen) { feedStart(k); hints(); } }   // and the panel follows the chart (each instrument keeps its own position / order)
   start();
 }
 $("inst").onchange = () => setInst($("inst").value);
+$("src").onchange = () => {              // QQQ / TQQQ: Binance perpetual or Yahoo Finance data
+  dsrc = $("src").value; store("src_" + inst, dsrc); candles = []; bands = []; ticker = null; view.off = 0;
+  $("px").title = dsrc === "yahoo" ? "Yahoo 最新价" : "币安 " + INSTS[inst].short + " 最新价";
+  if (six && !bi) sixLoad();
+  start();
+};
 
 function setStatus(s, text) {
   status = s;
@@ -200,12 +218,12 @@ const SIXTF = ["3m", "5m", "15m", "30m", "1h", "4h"];
 let six = false, sixFrames = [], cellSim = { poss: {}, ords: {} };
 let bi = false;
 const BI_CELLS = [["btc", "1h"], ["btc", "1d"], ["btc", "1w"], ["eth", "1h"], ["eth", "1d"], ["eth", "1w"]];
-function sixSrc(i, t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local", "bi"].forEach(k => u.delete(k)); u.set("inst", i); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); if (bi) u.set("bi", "1"); return location.pathname + "?" + u.toString(); }
+function sixSrc(i, t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local", "bi", "src"].forEach(k => u.delete(k)); u.set("inst", i); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); if (bi) u.set("bi", "1"); if (INSTS[i].yahoo) u.set("src", dsrc); return location.pathname + "?" + u.toString(); }
 function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (bi ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : sixSrc(inst, SIXTF[n])) : "about:blank"; }); }
 function setBi(on) {
   if (CELL || bi === on) return;
   bi = on; document.body.classList.toggle("bi", on); $("bibtn").classList.toggle("on", on);
-  if (on && inst === "qqq") { bi = on; setInst("btc"); }     // the drop-down on the left must show a coin that is on screen
+  if (on && INSTS[inst].yahoo) { bi = on; setInst("btc"); }     // the drop-down on the left must show a coin that is on screen
   sixLoad();
 }
 $("bibtn").onclick = () => setBi(!bi);
@@ -220,13 +238,15 @@ function setSix(on) {
 }
 function sixPush() {   // the cells have no trading of their own: they get the position / order lines and the Bollinger switch from this page
   if (!six) return;
-  const m = { simu: { poss: SRV ? POS : (pos ? { [pos.inst]: pos } : {}), ords: SRV ? ORD : (ord ? { [ord.inst]: ord } : {}) }, bb: bbOn };      // every instrument's lines: the Bi Coin cells show two coins
+  const m = { simu: { poss: SRV ? POS : (pos ? { [pos.inst]: pos } : {}), ords: SRV ? ORD : (ord ? { [ord.inst]: ord } : {}) }, bb: bbOn, ema: emaOn };      // every instrument's lines: the Bi Coin cells show two coins
   sixFrames.forEach(f => { try { f.contentWindow.postMessage(m, "*"); } catch (e) {} });
 }
 if (CELL) window.addEventListener("message", e => {
   const d = e.data; if (!d || !d.simu) return;
   const k = JSON.stringify(d); if (k === sixPush.last) return; sixPush.last = k;
-  cellSim = d.simu; if (bbOn !== d.bb) { bbOn = d.bb; $("bb").classList.toggle("on", bbOn); } render();
+  cellSim = d.simu; if (bbOn !== d.bb) { bbOn = d.bb; $("bb").classList.toggle("on", bbOn); }
+  if (emaOn !== d.ema) { emaOn = d.ema; $("emabtn").classList.toggle("on", emaOn); }
+  render();
 });
 else setInterval(sixPush, 500);
 $("gridbtn").onclick = () => setSix(!six);
@@ -241,6 +261,12 @@ function recomputeBands() {
     for (let j = i - NB + 1; j <= i; j++) { const c = candles[j].c; s += c; s2 += c * c; }
     const m = s / NB, sd = Math.sqrt(Math.max(s2 / NB - m * m, 0));
     bands[i] = { m, u: m + KB * sd, l: m - KB * sd };
+  }
+  emas = new Array(candles.length).fill(null);          // EMA(NE), seeded with the simple average of the first NE closes
+  if (candles.length >= NE) {
+    let e = 0; for (let i = 0; i < NE; i++) e += candles[i].c;
+    e /= NE; emas[NE - 1] = e; const a = 2 / (NE + 1);
+    for (let i = NE; i < candles.length; i++) { e = candles[i].c * a + e * (1 - a); emas[i] = e; }
   }
 }
 function applyKline(k) {          // k: {t,o,h,l,c,v}
@@ -257,12 +283,88 @@ async function fetchKlines(limit) {
   return (await r.json()).map(parseK);
 }
 
+// ---------- Yahoo Finance candles (QQQ / TQQQ with the "Yahoo" source) ----------
+// Yahoo's chart API sends no CORS headers: the desktop app fetches it through its Python side (pywebview api.yahoo), a page served by the SIMU server through
+// the server's /api/yahoo, and the six-period cells ask this page (their parent) over postMessage.
+const YBASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
+const YMAP = { "3m": ["1m", "2d", "1d", 1], "5m": ["5m", "1mo", "1d", 1], "15m": ["15m", "1mo", "1d", 1], "30m": ["30m", "1mo", "1d", 1], "1h": ["60m", "6mo", "5d", 1],
+               "4h": ["60m", "1y", "5d", 1], "1d": ["1d", "2y", "5d", 1], "1w": ["1wk", "5y", "1mo", 1], "1M": ["1mo", "10y", "6mo", 1] };
+// 3m and 4h are built from 1m / 60m candles (YAGG below)
+const YAGG = { "3m": 18e4, "4h": 144e5 };
+let yreqId = 0; const yPending = {};
+async function yfetchDirect(sym, query) {
+  try { if (window.pywebview && pywebview.api && pywebview.api.yahoo) return JSON.parse(await pywebview.api.yahoo(sym, query)); } catch (e) { /* try the next way */ }
+  if (SRV) { try { return await api("GET", "/api/yahoo?sym=" + encodeURIComponent(sym) + "&" + query); } catch (e) { /* try the next way */ } }
+  const r = await fetch(YBASE + encodeURIComponent(sym) + "?" + query);
+  if (!r.ok) throw new Error("HTTP " + r.status + " (Yahoo 需要通过桌面软件或 SIMU 服务器取数)");
+  return r.json();
+}
+function yfetch(sym, query) {
+  if (!CELL || window.parent === window) return yfetchDirect(sym, query);
+  return new Promise((res, rej) => {
+    const id = ++yreqId; yPending[id] = [res, rej];
+    window.parent.postMessage({ yreq: id, sym, query }, "*");
+    setTimeout(() => { if (yPending[id]) { delete yPending[id]; rej(new Error("Yahoo 超时")); } }, 25000);
+  });
+}
+window.addEventListener("message", async e => {
+  const d = e.data; if (!d) return;
+  if (d.yreq && !CELL) {
+    let out; try { out = { yres: d.yreq, ok: true, json: await yfetchDirect(String(d.sym), String(d.query)) }; } catch (er) { out = { yres: d.yreq, ok: false, err: String(er && er.message || er) }; }
+    try { e.source.postMessage(out, "*"); } catch (e2) {}
+  } else if (d.yres && CELL) {
+    const w = yPending[d.yres]; if (w) { delete yPending[d.yres]; d.ok ? w[0](d.json) : w[1](new Error(d.err)); }
+  } else if (d.open && !CELL) openSingle(d.open);
+});
+async function fetchYahooCandles(incr) {
+  const [iv, rg, prg] = YMAP[tf], intra = !(tf === "1d" || tf === "1w" || tf === "1M");
+  const j = await yfetch(INSTS[inst].yahoo, "interval=" + iv + "&range=" + (incr ? prg : rg) + (intra ? "&includePrePost=true" : ""));
+  const r = j && j.chart && j.chart.result && j.chart.result[0];
+  if (!r) throw new Error(j && j.chart && j.chart.error ? j.chart.error.description : "没有数据");
+  const ts = r.timestamp || [], q = r.indicators.quote[0]; let arr = [];
+  for (let i = 0; i < ts.length; i++) { if (q.close[i] == null || q.open[i] == null || q.high[i] == null || q.low[i] == null) continue; arr.push({ t: ts[i] * 1000, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume[i] || 0 }); }
+  if (YAGG[tf]) {
+    const step = YAGG[tf], out = [];
+    for (const k of arr) { const b = Math.floor(k.t / step) * step, l = out[out.length - 1]; if (l && l.t === b) { l.h = Math.max(l.h, k.h); l.l = Math.min(l.l, k.l); l.c = k.c; l.v += k.v; } else out.push({ t: b, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v }); }
+    arr = incr ? out.slice(1) : out;          // the first bucket of a short range may be cut off
+  }
+  return arr;
+}
+function mergeCandles(arr) {
+  for (const k of arr) { let i = candles.length - 1; while (i >= 0 && candles[i].t > k.t) i--; if (i >= 0 && candles[i].t === k.t) candles[i] = k; else if (i === candles.length - 1) candles.push(k); }
+  if (candles.length > 1500) candles.splice(0, candles.length - 1500);
+  recomputeBands();
+}
+async function startYahooData(my) {
+  setStatus("connecting", "加载 Yahoo K线…");
+  try { const arr = await fetchYahooCandles(false); if (my !== gen) return; candles = arr.slice(-1500); recomputeBands(); render(); }
+  catch (e) { if (my !== gen) return; setStatus("err", "Yahoo K线加载失败: " + e.message + " (5秒后重试)"); setTimeout(() => { if (my === gen) start(); }, 5000); return; }
+  setStatus("live", "Yahoo K线, 每 15 秒刷新");
+  pollTimer = setInterval(async () => {
+    try { const arr = await fetchYahooCandles(true); if (my !== gen) return; mergeCandles(arr); scheduleRender(); } catch (e) {}
+  }, 15000);
+}
+function tickYahooCandle(p) {       // the Yahoo price stream moves the last intraday candle between two refreshes
+  if (dsrc !== "yahoo" || tf === "1d" || tf === "1w" || tf === "1M") return;
+  const c = candles[candles.length - 1]; if (!c || Date.now() >= c.t + TF_MS[tf]) return;
+  c.c = p; c.h = Math.max(c.h, p); c.l = Math.min(c.l, p); recomputeBands(); scheduleRender();
+}
+function openSingle(o) {              // double click on a cell of the six-period view: show that chart alone
+  if (!six || !o || !INSTS[o.inst]) return;
+  setSix(false);
+  if (TFS.includes(o.tf)) { tf = o.tf; store("tf", tf); document.querySelectorAll("#tfs button").forEach(b => b.classList.toggle("on", b.dataset.tf === tf)); }
+  if (INSTS[o.inst].yahoo && (o.src === "yahoo" || o.src === "binance")) store("src_" + o.inst, o.src);
+  view.off = 0;
+  if (o.inst !== inst) setInst(o.inst); else { dsrc = srcOf(inst); $("src").value = dsrc; reportState(); start(); }
+}
+
 function closeWs() { if (ws) { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; } }
 async function start() {
   const my = ++gen;
   closeWs(); clearInterval(pollTimer); clearInterval(wd);
   setStatus("connecting", "加载历史K线…");
   if (MOCK) { mockStart(my); return; }
+  if (dsrc === "yahoo") { startYahooData(my); return; }
   try {
     candles = await fetchKlines(500);
     if (my !== gen) return;
@@ -312,7 +414,7 @@ function startPoll(my) {
 // ---------- mock (layout test only) ----------
 function mockStart(my) {
   const step = TF_MS[tf], now = Math.floor(Date.now() / step) * step;
-  let p = inst === "btc" ? 76000 : inst === "eth" ? 2245 : 693, arr = [];
+  let p = inst === "btc" ? 76000 : inst === "eth" ? 2245 : inst === "tqqq" ? 56 : 693, arr = [];
   const rnd = (() => { let x = 12345; return () => (x = (x * 16807) % 2147483647) / 2147483647; })();
   for (let i = 499; i >= 0; i--) {
     const k = p / 693, o = p, c = o + (rnd() - 0.5) * 3.2 * k, h = Math.max(o, c) + rnd() * 1.4 * k, l = Math.min(o, c) - rnd() * 1.4 * k;
@@ -361,6 +463,7 @@ function render() {
   for (let i = i0; i <= i1; i++) {
     const c = candles[i]; lo = Math.min(lo, c.l); hi = Math.max(hi, c.h);
     if (bbOn && bands[i]) { lo = Math.min(lo, bands[i].l); hi = Math.max(hi, bands[i].u); }
+    if (emaOn && emas[i] != null) { lo = Math.min(lo, emas[i]); hi = Math.max(hi, emas[i]); }
   }
   if (!(hi > lo)) { hi = lo + 1; }
   const padv = (hi - lo) * 0.06; lo -= padv; hi += padv;
@@ -406,6 +509,12 @@ function render() {
     ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, yOf(c.h)); ctx.lineTo(Math.round(x) + 0.5, yOf(c.l)); ctx.stroke();
     const y1 = yOf(Math.max(c.o, c.c)), y2 = yOf(Math.min(c.o, c.c));
     ctx.fillRect(Math.round(x - bw / 2), y1, Math.max(1, Math.round(bw)), Math.max(1, y2 - y1));
+  }
+
+  if (emaOn) {          // EMA curve, drawn over the candles
+    ctx.beginPath(); ctx.setLineDash([]); ctx.strokeStyle = "#ff7ab6"; ctx.lineWidth = 1.4; let st = false;
+    for (let i = i0; i <= i1; i++) { if (emas[i] == null) continue; const x = xOf(i), y = yOf(emas[i]); if (!st) { ctx.moveTo(x, y); st = true; } else ctx.lineTo(x, y); }
+    ctx.stroke(); ctx.lineWidth = 1;
   }
 
   // last price line
@@ -481,13 +590,18 @@ cv.addEventListener("mousedown", e => { drag = { x: e.clientX, off: view.off }; 
 window.addEventListener("mouseup", () => { drag = null; });
 cv.addEventListener("mouseup", () => { drag = null; });
 cv.addEventListener("wheel", e => { e.preventDefault(); view.n = Math.max(20, Math.min(400, view.n * (e.deltaY > 0 ? 1.15 : 0.87))); render(); }, { passive: false });
-cv.addEventListener("dblclick", () => { view.n = 90; view.off = 0; render(); });
+cv.addEventListener("dblclick", () => {
+  if (CELL && window.parent !== window) { try { window.parent.postMessage({ open: { inst, tf, src: dsrc } }, "*"); } catch (e) {} return; }     // six-period view: open this chart as the single chart
+  view.n = 90; view.off = 0; render();
+});
 
 
 // ---------- Yahoo QQQ price ----------
 // Primary: Yahoo's own websocket streamer (websockets are not subject to CORS, so a local page can use it directly).
 const MH = ["盘前", "盘中", "盘后", "延长时段", "夜盘"];
-let qqq = { price: null, at: 0, src: null, mh: null, tick: 0 };
+const blankQ = () => ({ price: null, at: 0, src: null, mh: null, tick: 0 });
+const yquote = { QQQ: blankQ(), TQQQ: blankQ() };
+const yq = () => yquote[INSTS[inst].yahoo] || blankQ();
 function readVarint(b, i) { let r = 0, s = 0; for (;;) { const x = b[i++]; r += (x & 127) * Math.pow(2, s); if (!(x & 128)) break; s += 7; } return [r, i]; }
 function decodeYahoo(b64) {
   const bin = atob(b64), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
@@ -515,11 +629,12 @@ function connectYahoo() {
   try { w = new WebSocket("wss://streamer.finance.yahoo.com/?version=2"); } catch (e) { yRetry = setTimeout(connectYahoo, 5000); return; }
   yws = w;
   yStatus();
-  w.onopen = () => { yStatus(); w.send(JSON.stringify({ subscribe: ["QQQ"] })); ySub = setInterval(() => { try { w.send(JSON.stringify({ subscribe: ["QQQ"] })); } catch (e) {} }, 60000); };
+  w.onopen = () => { yStatus(); w.send(JSON.stringify({ subscribe: ["QQQ", "TQQQ"] })); ySub = setInterval(() => { try { w.send(JSON.stringify({ subscribe: ["QQQ", "TQQQ"] })); } catch (e) {} }, 60000); };
   w.onmessage = ev => {
     let d; try { d = decodeYahoo(JSON.parse(ev.data).message); } catch (e) { return; }
-    if (d[1] !== "QQQ" || typeof d[2] !== "number" || !(d[2] > 0)) return;
-    qqq = { price: d[2], at: Date.now(), src: "ws", mh: d[7], tick: d[3] ? (d[3] % 2 === 0 ? d[3] / 2 : -(d[3] + 1) / 2) : Date.now() };
+    if (!yquote[d[1]] || typeof d[2] !== "number" || !(d[2] > 0)) return;
+    yquote[d[1]] = { price: d[2], at: Date.now(), src: "ws", mh: d[7], tick: d[3] ? (d[3] % 2 === 0 ? d[3] / 2 : -(d[3] + 1) / 2) : Date.now() };
+    if (INSTS[inst].yahoo === d[1]) tickYahooCandle(d[2]);
     showQqq();
   };
   w.onclose = () => { clearInterval(ySub); yStatus(); yRetry = setTimeout(connectYahoo, 3000); };
@@ -527,7 +642,7 @@ function connectYahoo() {
 }
 // light next to the QQQ price: green = quotes arriving; yellow = connected but silent (normal when the market is closed); red = disconnected; grey = connecting
 function yStatus() {
-  const d = $("ydot"), rs = yws ? yws.readyState : 3;
+  const d = $("ydot"), rs = yws ? yws.readyState : 3, qqq = yq();
   let col, tip;
   if (rs === 0) { col = "#6a7683"; tip = "Yahoo: 正在连接…"; }
   else if (rs !== 1) { col = "#e5534b"; tip = "Yahoo: 连接已断开, 正在重连…"; }
@@ -537,14 +652,14 @@ function yStatus() {
 }
 function showQqq() {
   yStatus();
-  const el = $("qpx");
+  const el = $("qpx"), qqq = yq(), nm = INSTS[inst].yahoo || "QQQ";
   el.textContent = qqq.price == null ? "--" : fmt(qqq.price);
   // dim when nothing has arrived for a while (normal when the market is closed and nobody trades)
   el.classList.toggle("stale", qqq.price == null || Date.now() - qqq.at > 120000);
   const hms = qqq.tick ? new Date(qqq.tick).toLocaleTimeString() : "";
-  el.title = qqq.price == null ? "等待 Yahoo QQQ 价格…" : "Yahoo QQQ (" + (qqq.mh != null && MH[qqq.mh] ? MH[qqq.mh] : "") + ") 最后更新 " + hms;
+  el.title = qqq.price == null ? "等待 Yahoo " + nm + " 价格…" : "Yahoo " + nm + " (" + (qqq.mh != null && MH[qqq.mh] ? MH[qqq.mh] : "") + ") 最后更新 " + hms;
 }
-if (MOCK) { qqq = { price: 686.8, at: Date.now() + 1e12, src: "ws", mh: 0, tick: Date.now() }; showQqq(); }
+if (MOCK) { yquote.QQQ = { price: 686.8, at: Date.now() + 1e12, src: "ws", mh: 0, tick: Date.now() }; yquote.TQQQ = { price: 56.4, at: Date.now() + 1e12, src: "ws", mh: 0, tick: Date.now() }; showQqq(); }
 else { setInterval(showQqq, 5000); }
 
 // ---------- floating window (Document Picture-in-Picture) ----------
@@ -586,7 +701,7 @@ if (Q.has("diag")) document.title += "  [secure=" + window.isSecureContext + " p
 // ---------- simulated contract trading (practice only: no capital, no history) ----------
 // ROE (return on margin) = side * leverage * (price / entry - 1), minus taker fees on the notional at both ends (optional).
 // Liquidation: margin + PnL - open fee <= maintenance margin (notional * MMR). MMR below: BTC/ETH = Binance first tier; QQQ is an assumed value.
-const TR = { qqq: { max: 25, mmr: 0.02 }, eth: { max: 150, mmr: 0.004 }, btc: { max: 150, mmr: 0.004 } };
+const TR = { qqq: { max: 25, mmr: 0.02 }, tqqq: { max: 20, mmr: 0.025 }, eth: { max: 150, mmr: 0.004 }, btc: { max: 150, mmr: 0.004 } };
 const TAKER = 0.0005, MAKER = 0.0002, DEF_EXP = 30;
 let ord = null, tMode = "mkt";
 let POS = {}, ORD = {}, PR = {}, LASTST = null;   // server mode: every instrument's open position / pending order (up to three at once) and the latest prices; pos / ord below are the ones of the panel's instrument
@@ -616,7 +731,7 @@ async function api(method, path, body) {
   if (!r.ok) { const er = new Error(j.error || ("HTTP " + r.status)); er.http = r.status; throw er; }
   return j;
 }
-const SSYM = { qqq: "QQQUSDT", eth: "ETHUSDT", btc: "BTCUSDT" };      // the server always trades the perpetual contracts
+const SSYM = { qqq: "QQQUSDT", tqqq: "TQQQUSDT", btc: "BTCUSDT", eth: "ETHUSDT" };      // the server always trades the perpetual contracts
 const watchInst = () => SRV ? tInst : (pos ? pos.inst : ord ? ord.inst : (tOpen ? tInst : inst));
 function srvLabel() {
   const e = $("tpsrv");
@@ -684,7 +799,7 @@ window.__tick = p => feedTick(p);            // test hook (mock mode)
 const fresh = () => feed.price != null && Date.now() - feed.at < 12000;
 
 // the SIMU button (and the window title, which a minimized window still shows in the task bar) rotates every 3 s through every open position / pending order
-const SHORT = { qqq: "QQQ", eth: "ETH", btc: "BTC" };
+const SHORT = { qqq: "QQQ", tqqq: "TQQQ", btc: "BTC", eth: "ETH" };
 function simList() {
   const out = [], pxOf = q => { const v = SRV ? PR[SSYM[q.inst]] : null; return v ? v.p : (!SRV && feed.price != null ? feed.price : q.last); };
   if (SRV) { Object.keys(POS).forEach(k => out.push({ inst: k, roe: roeAt(pxOf(POS[k]), POS[k]) })); Object.keys(ORD).forEach(k => { if (!POS[k]) out.push({ inst: k, ord: ORD[k] }); }); }
