@@ -581,6 +581,7 @@ Object.keys(INSTS).forEach(k => { const o = document.createElement("option"); o.
 const pnum = el => { const v = parseFloat(String(el.value).replace(/,/g, "")); return v > 0 ? v : null; };
 const pc = (v, d) => (v >= 0 ? "+" : "") + (v * 100).toFixed(d == null ? 2 : d) + "%";
 const foOf = q => q.fo != null ? q.fo : TAKER;                 // fee rate of the opening fill (maker for a limit fill, taker otherwise); closing is always taker
+const roeGross = (p, q) => q.side * q.lev * (p / q.entry - 1);      // return on margin if filled at p, fees left out (the hints next to the take-profit / stop-loss fields)
 const roeAt = (p, q) => { const r = p / q.entry; let v = q.side * q.lev * (r - 1); if (q.fee) v -= q.lev * (foOf(q) + TAKER * r); return v; };
 const liqOf = q => { const m = TR[q.inst].mmr, f0 = q.fee ? q.lev * foOf(q) : 0; return q.entry * (q.side * q.lev - 1 + f0) / (q.lev * (q.side - m)); };
 const dur = ms => { const s = Math.round(ms / 1000); return s < 3600 ? Math.floor(s / 60) + "分" + pad2(s % 60) + "秒" : Math.floor(s / 3600) + "小时" + pad2(Math.floor(s % 3600 / 60)) + "分"; };
@@ -732,7 +733,7 @@ function hints() {
     if (!v) { h.textContent = ""; h.className = "hint"; return; }
     const ok = kind === "tp" ? (tSide > 0 ? v > p : v < p) : (tSide > 0 ? v < p : v > p);
     if (!ok) { h.textContent = (tSide > 0 === (kind === "tp") ? "须高于" : "须低于") + (tMode === "lmt" ? "限价" : "现价"); h.className = "hint dn"; return; }
-    const r = roeAt(v, q); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up" : "dn");
+    const r = roeGross(v, q); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up" : "dn");
   };
   one($("tptp"), "tptph", "tp"); one($("tpsl"), "tpslh", "sl");
   const lq = liqOf(q); $("tpwarn").textContent = (tMode === "lmt" && lp ? "成交后" : "") + "爆仓价约 " + fmt(lq, p >= 1000 ? 1 : 2) + (q.lev >= 100 ? "  (高杠杆极易爆仓)" : "");
@@ -832,13 +833,15 @@ setInterval(() => {
 // ---------- the panel: one card per open position / pending order (oldest on top), the new-order form below ----------
 const CARD_POS = '<div class="ch"><b class="cd"></b><span class="sp"></span><span class="lb cdur"></span></div><div class="big croe">--</div>' +
   '<div class="kv"><span>开仓 <b class="cent"></b></span><span>现价 <b class="cnow"></b></span></div><div class="kv"><span>爆仓价</span><b class="cliq"></b></div>' +
-  '<div class="r"><span class="k">止盈</span><input class="ptp" type="text" placeholder="无" inputmode="decimal"><span class="k" style="width:auto">止损</span><input class="psl" type="text" placeholder="无" inputmode="decimal"></div>' +
+  '<div class="r"><span class="k">止盈</span><input class="ptp" type="text" placeholder="无" inputmode="decimal"><span class="hint ptph"></span></div>' +
+  '<div class="r"><span class="k">止损</span><input class="psl" type="text" placeholder="无" inputmode="decimal"><span class="hint pslh"></span></div>' +
   '<div class="warn cw"></div><button class="go stop pend">平仓</button>';
 const CARD_ORD = '<div class="ch"><b class="cd"></b><span class="sp"></span><span class="lb cot"></span></div>' +
   '<div class="kv"><span>现价 <b class="onow"></b></span><span>距离限价 <b class="odist"></b></span></div>' +
   '<div class="r"><span class="k">限价</span><input class="oprice" type="text" inputmode="decimal"><span class="hint okind"></span></div>' +
   '<div class="r"><span class="k">杠杆</span><input class="olev" type="number" min="1" step="1"><span>x</span><span class="k" style="width:auto">倒计时</span><input class="omin" type="number" min="1" max="1440" step="1"><span>分</span></div>' +
-  '<div class="r"><span class="k">止盈</span><input class="otp" type="text" placeholder="无" inputmode="decimal"><span class="k" style="width:auto">止损</span><input class="osl" type="text" placeholder="无" inputmode="decimal"></div>' +
+  '<div class="r"><span class="k">止盈</span><input class="otp" type="text" placeholder="无" inputmode="decimal"><span class="hint otph"></span></div>' +
+  '<div class="r"><span class="k">止损</span><input class="osl" type="text" placeholder="无" inputmode="decimal"><span class="hint oslh"></span></div>' +
   '<div class="warn cw"></div><button class="go stop cancel">撤单</button>';
 const setVal = (el, v) => { if (document.activeElement !== el && el.value !== String(v)) el.value = v; };
 function renderCards() {
@@ -866,6 +869,7 @@ function updPosCard(c, k, q) {
   setVal($c(".ptp"), q.tp ? q.tp : ""); setVal($c(".psl"), q.sl ? q.sl : "");
   const bad = q.sl != null && (q.side > 0 ? q.sl <= q.liq : q.sl >= q.liq), w = $c(".cw");
   w.textContent = c._msg || (bad ? "止损价在爆仓价之外, 会先爆仓" : ""); w.style.color = c._msg ? "var(--dn)" : "";
+  cardHints(c);
 }
 function updOrdCard(c, k, o) {
   const px = priceOf(k, null), d = o.price >= 1000 ? 1 : 2, $c = s => c.querySelector(s);
@@ -877,7 +881,22 @@ function updOrdCard(c, k, o) {
   setVal($c(".oprice"), fmt(o.price, d)); setVal($c(".olev"), o.lev); setVal($c(".omin"), o.mins); setVal($c(".otp"), o.tp ? o.tp : ""); setVal($c(".osl"), o.sl ? o.sl : "");
   const lq = liqOf({ inst: k, side: o.side, lev: o.lev, entry: o.price, fee: o.fee, fo: o.kind === "limit" ? MAKER : TAKER }), w = $c(".cw");
   w.textContent = c._msg || ("成交后爆仓价约 " + fmt(lq, d) + ", 超时自动撤单"); w.style.color = c._msg ? "var(--dn)" : "";
+  cardHints(c);
 }
+function cardHints(c) {                          // expected return on margin if take-profit / stop-loss fills, fees excluded; follows what is typed in the field
+  const k = c.dataset.inst, q = getPos(k), o = q ? null : getOrd(k), b = q || o; if (!b) return;
+  const entry = q ? q.entry : o.price, ref = { side: b.side, lev: b.lev, entry };
+  const one = (inp, hint, kind) => {
+    const v = pnum(inp), h = c.querySelector(hint);
+    if (!v) { h.textContent = ""; h.className = "hint " + hint.slice(1); return; }
+    const ok = kind === "tp" ? (b.side > 0 ? v > entry : v < entry) : (b.side > 0 ? v < entry : v > entry);
+    if (!ok) { h.textContent = (b.side > 0 === (kind === "tp") ? "须高于" : "须低于") + (q ? "开仓价" : "限价"); h.className = "hint dn " + hint.slice(1); return; }
+    const r = roeGross(v, ref); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up " : "dn ") + hint.slice(1);
+  };
+  if (q) { one(c.querySelector(".ptp"), ".ptph", "tp"); one(c.querySelector(".psl"), ".pslh", "sl"); }
+  else { one(c.querySelector(".otp"), ".otph", "tp"); one(c.querySelector(".osl"), ".oslh", "sl"); }
+}
+$("tp-cards").addEventListener("input", e => { const c = cardOf(e.target); if (c) cardHints(c); });
 const cardOf = el => el.closest(".card");
 function cardMsg(c, m) { c._msg = m || ""; renderCards(); }
 function editLevel(c, which, el) {              // take-profit / stop-loss of an open position
