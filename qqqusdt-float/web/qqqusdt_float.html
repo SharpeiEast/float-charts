@@ -298,8 +298,8 @@ async function fetchKlines(limit, endTime) {
 // Yahoo's chart API sends no CORS headers: the desktop app fetches it through its Python side (pywebview api.yahoo), a page served by the SIMU server through
 // the server's /api/yahoo, and the six-period cells ask this page (their parent) over postMessage.
 const YBASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
-const YMAP = { "3m": ["1m", "2d", "1d", 1], "5m": ["5m", "1mo", "1d", 1], "15m": ["15m", "1mo", "1d", 1], "30m": ["30m", "1mo", "1d", 1], "1h": ["60m", "6mo", "5d", 1],
-               "4h": ["60m", "1y", "5d", 1], "1d": ["1d", "2y", "5d", 1], "1w": ["1wk", "5y", "1mo", 1], "1M": ["1mo", "10y", "6mo", 1] };
+const YMAP = { "3m": ["1m", "7d", "1d", 1], "5m": ["5m", "60d", "1d", 1], "15m": ["15m", "60d", "1d", 1], "30m": ["30m", "60d", "1d", 1], "1h": ["60m", "730d", "5d", 1],
+               "4h": ["60m", "730d", "5d", 1], "1d": ["1d", "30y", "5d", 1], "1w": ["1wk", "30y", "1mo", 1], "1M": ["1mo", "30y", "6mo", 1] };     // the longest history Yahoo gives per interval (1m 7 days, 5m-30m 60 days, 60m 730 days)
 // 3m and 4h are built from 1m / 60m candles (YAGG below)
 const YAGG = { "3m": 18e4, "4h": 144e5 };
 let yreqId = 0; const yPending = {};
@@ -349,7 +349,7 @@ function mergeCandles(arr) {
 }
 async function startYahooData(my) {
   setStatus("connecting", "加载 Yahoo K线…");
-  try { const arr = await fetchYahooCandles(false); if (my !== gen) return; candles = arr.slice(-1500); recomputeBands(); render(); if (anchor) jumpTo(anchor); }
+  try { const arr = await fetchYahooCandles(false); if (my !== gen) return; candles = arr.slice(-MAXC); recomputeBands(); render(); if (anchor) jumpTo(anchor); }
   catch (e) { if (my !== gen) return; setStatus("err", "Yahoo K线加载失败: " + e.message + " (5秒后重试)"); setTimeout(() => { if (my === gen) start(); }, 5000); return; }
   setStatus("live", "Yahoo K线, 每 15 秒刷新");
   pollTimer = setInterval(async () => {

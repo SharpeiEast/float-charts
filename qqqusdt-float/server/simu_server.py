@@ -541,7 +541,7 @@ def yahoo_chart(sym, q):
     if not re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
         raise ValueError("sym")
     iv, rg = (q.get("interval") or [""])[0], (q.get("range") or [""])[0]
-    if not re.fullmatch(r"\d{1,2}(m|h)|\d{1,2}(d|wk|mo)", iv) or not re.fullmatch(r"\d{1,2}(d|mo|y)", rg):
+    if not re.fullmatch(r"\d{1,2}(m|h)|\d{1,2}(d|wk|mo)", iv) or not re.fullmatch(r"\d{1,3}(d|mo|y)", rg):
         raise ValueError("params")
     pp = (q.get("includePrePost") or ["false"])[0] == "true"
     url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=%s&range=%s&includePrePost=%s" % (sym, iv, rg, "true" if pp else "false")
