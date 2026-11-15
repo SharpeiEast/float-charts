@@ -326,6 +326,7 @@ window.addEventListener("message", async e => {
   } else if (d.yres && CELL) {
     const w = yPending[d.yres]; if (w) { delete yPending[d.yres]; d.ok ? w[0](d.json) : w[1](new Error(d.err)); }
   } else if (d.open && !CELL) openSingle(d.open);
+  else if (d.anchorSet !== undefined && !CELL) anchor = d.anchorSet;
 });
 async function fetchYahooCandles(incr) {
   const [iv, rg, prg] = YMAP[tf], intra = !(tf === "1d" || tf === "1w" || tf === "1M");
@@ -663,13 +664,22 @@ $("goin").addEventListener("keydown", e => { if (e.key === "Enter") goDo(); else
 // ---------- interaction ----------
 cv.addEventListener("mousemove", e => {
   const r = cv.getBoundingClientRect(); hover = { x: e.clientX - r.left, y: e.clientY - r.top };
-  if (drag) { const step = (r.width - 68) / view.n, dx = e.clientX - drag.x; view.off = drag.off + dx / step; render(); } else render();
+  if (drag) { const step = (r.width - 68) / view.n, dx = e.clientX - drag.x; view.off = drag.off + dx / step; drag.moved = true; render(); } else render();
 });
 cv.addEventListener("mouseleave", () => { hover = null; render(); });
 let drag = null;
 cv.addEventListener("mousedown", e => { drag = { x: e.clientX, off: view.off }; });
-window.addEventListener("mouseup", () => { drag = null; });
-cv.addEventListener("mouseup", () => { drag = null; });
+function endDrag() {          // dragging the chart moves the anchor too: period / instrument switches and the six-period view stay at the time now in the middle
+  if (drag && drag.moved && candles.length) {
+    const n = Math.round(view.n), end = candles.length - Math.round(view.off);
+    const a = view.off > 0.5 ? candles[Math.max(0, Math.min(candles.length - 1, Math.round(end - n / 2 - 0.5)))].t : null;
+    anchor = a;
+    if (CELL && window.parent !== window) { try { window.parent.postMessage({ anchorSet: a }, "*"); } catch (e) {} }
+  }
+  drag = null;
+}
+window.addEventListener("mouseup", endDrag);
+cv.addEventListener("mouseup", endDrag);
 cv.addEventListener("wheel", e => { e.preventDefault(); view.n = Math.max(20, Math.min(400, view.n * (e.deltaY > 0 ? 1.15 : 0.87))); render(); }, { passive: false });
 cv.addEventListener("dblclick", () => {
   if (CELL && window.parent !== window) { try { window.parent.postMessage({ open: { inst, tf, src: dsrc } }, "*"); } catch (e) {} return; }     // six-period view: open this chart as the single chart
