@@ -74,7 +74,7 @@
     <span id="celltf"></span>
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
-    <button id="emabtn" title="EMA (20) 开/关">EMA</button>
+    <button id="emabtn" title="EMA 5 / 10 / 20 开/关">EMA</button>
     <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
     <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1h / 1d / 1w">Bi Coin</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
@@ -161,8 +161,8 @@ const app = $("app"), cv = $("cv"), ctx = cv.getContext("2d");
 
 let tf = TFS.includes(Q.get("tf")) ? Q.get("tf") : (TFS.includes(store("tf")) ? store("tf") : "1h");
 let bbOn = store("bb") !== "0";
-const NE = 20;                                // EMA period
-let emaOn = store("ema") === "1", emas = [];
+const NES = [5, 10, 20], ECOL = ["#ff7ab6", "#4fd6c8", "#ffffff"];     // EMA periods and colours
+let emaOn = store("ema") === "1", emas = [[], [], []];
 let candles = [], bands = [], ticker = null, tickerAt = 0, view = { n: 90, off: 0 }, hover = null;
 let ws = null, gen = 0, lastMsg = 0, status = "init", pollTimer = null, wd = null;
 
@@ -179,10 +179,11 @@ window.addEventListener("storage", e => {
 });   // other windows of the app
 function toast(t) { const el = $("toast"); el.textContent = t; el.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = "none", 2500); }
 function reportState() { if (CELL) return; try { if (window.pywebview && pywebview.api && pywebview.api.set_state) pywebview.api.set_state(inst, tf, btnRefresh.title || INSTS[inst].title); } catch (e) {} }
-function setInst(k) {
+function setInst(k, src) {
   if (!INSTS[k]) return;
+  const carry = src || (!CELL && INSTS[inst].yahoo && INSTS[k].yahoo ? dsrc : null);     // QQQ <-> TQQQ keeps the data source (Binance / Yahoo) that is on screen
   inst = k; store("inst", k); view.off = 0; candles = []; bands = []; ticker = null;
-  dsrc = srcOf(k); $("src").value = dsrc; $("src").style.display = INSTS[k].yahoo && !CELL ? "" : "none";
+  dsrc = INSTS[k].yahoo && carry ? carry : srcOf(k); if (INSTS[k].yahoo && !CELL) store("src_" + k, dsrc); $("src").value = dsrc; $("src").style.display = INSTS[k].yahoo && !CELL ? "" : "none";
   $("inst").value = k;
   $("qpx").style.display = $("ydot").style.display = INSTS[k].yahoo ? "" : "none";
   $("px").textContent = "--"; $("px").title = "币安 " + INSTS[k].short + " 最新价";
@@ -262,12 +263,15 @@ function recomputeBands() {
     const m = s / NB, sd = Math.sqrt(Math.max(s2 / NB - m * m, 0));
     bands[i] = { m, u: m + KB * sd, l: m - KB * sd };
   }
-  emas = new Array(candles.length).fill(null);          // EMA(NE), seeded with the simple average of the first NE closes
-  if (candles.length >= NE) {
-    let e = 0; for (let i = 0; i < NE; i++) e += candles[i].c;
-    e /= NE; emas[NE - 1] = e; const a = 2 / (NE + 1);
-    for (let i = NE; i < candles.length; i++) { e = candles[i].c * a + e * (1 - a); emas[i] = e; }
-  }
+  emas = NES.map(NE => {          // EMA(NE), seeded with the simple average of the first NE closes
+    const out = new Array(candles.length).fill(null);
+    if (candles.length >= NE) {
+      let e = 0; for (let i = 0; i < NE; i++) e += candles[i].c;
+      e /= NE; out[NE - 1] = e; const a = 2 / (NE + 1);
+      for (let i = NE; i < candles.length; i++) { e = candles[i].c * a + e * (1 - a); out[i] = e; }
+    }
+    return out;
+  });
 }
 function applyKline(k) {          // k: {t,o,h,l,c,v}
   const last = candles[candles.length - 1];
@@ -353,9 +357,10 @@ function openSingle(o) {              // double click on a cell of the six-perio
   if (!six || !o || !INSTS[o.inst]) return;
   setSix(false);
   if (TFS.includes(o.tf)) { tf = o.tf; store("tf", tf); document.querySelectorAll("#tfs button").forEach(b => b.classList.toggle("on", b.dataset.tf === tf)); }
-  if (INSTS[o.inst].yahoo && (o.src === "yahoo" || o.src === "binance")) store("src_" + o.inst, o.src);
+  const osrc = INSTS[o.inst].yahoo && (o.src === "yahoo" || o.src === "binance") ? o.src : null;     // the cell's own data source carries over to the big chart
+  if (osrc) store("src_" + o.inst, osrc);
   view.off = 0;
-  if (o.inst !== inst) setInst(o.inst); else { dsrc = srcOf(inst); $("src").value = dsrc; reportState(); start(); }
+  if (o.inst !== inst) setInst(o.inst, osrc); else { dsrc = osrc || srcOf(inst); $("src").value = dsrc; reportState(); start(); }
 }
 
 function closeWs() { if (ws) { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; } }
@@ -440,6 +445,12 @@ function tlabel(ms, withDate) {
   const hm = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
   return withDate ? pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " + hm : hm;
 }
+function fullTime(ms) {
+  const d = new Date(ms), ymd = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  if (tf === "1M") return d.getFullYear() + "-" + pad2(d.getMonth() + 1);
+  if (tf === "1d" || tf === "1w") return ymd;
+  return ymd + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
 function cssv(name) { return getComputedStyle(app).getPropertyValue(name).trim(); }
 
 function render() {
@@ -463,7 +474,7 @@ function render() {
   for (let i = i0; i <= i1; i++) {
     const c = candles[i]; lo = Math.min(lo, c.l); hi = Math.max(hi, c.h);
     if (bbOn && bands[i]) { lo = Math.min(lo, bands[i].l); hi = Math.max(hi, bands[i].u); }
-    if (emaOn && emas[i] != null) { lo = Math.min(lo, emas[i]); hi = Math.max(hi, emas[i]); }
+    if (emaOn) for (const ea of emas) if (ea[i] != null) { lo = Math.min(lo, ea[i]); hi = Math.max(hi, ea[i]); }
   }
   if (!(hi > lo)) { hi = lo + 1; }
   const padv = (hi - lo) * 0.06; lo -= padv; hi += padv;
@@ -512,9 +523,13 @@ function render() {
   }
 
   if (emaOn) {          // EMA curve, drawn over the candles
-    ctx.beginPath(); ctx.setLineDash([]); ctx.strokeStyle = "#ff7ab6"; ctx.lineWidth = 1.4; let st = false;
-    for (let i = i0; i <= i1; i++) { if (emas[i] == null) continue; const x = xOf(i), y = yOf(emas[i]); if (!st) { ctx.moveTo(x, y); st = true; } else ctx.lineTo(x, y); }
-    ctx.stroke(); ctx.lineWidth = 1;
+    ctx.setLineDash([]); ctx.lineWidth = 1.3;
+    emas.forEach((ea, k) => {
+      ctx.beginPath(); ctx.strokeStyle = ECOL[k]; let st = false;
+      for (let i = i0; i <= i1; i++) { if (ea[i] == null) continue; const x = xOf(i), y = yOf(ea[i]); if (!st) { ctx.moveTo(x, y); st = true; } else ctx.lineTo(x, y); }
+      ctx.stroke();
+    });
+    ctx.lineWidth = 1;
   }
 
   // last price line
@@ -572,6 +587,9 @@ function render() {
     ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, T); ctx.lineTo(Math.round(x) + 0.5, T + ph); ctx.moveTo(L, Math.round(hover.y) + 0.5); ctx.lineTo(L + pw, Math.round(hover.y) + 0.5); ctx.stroke(); ctx.setLineDash([]);
     const pv = lo + (1 - (hover.y - T) / ph) * (hi - lo);
     ctx.fillStyle = "#2b3646"; ctx.fillRect(L + pw + 1, hover.y - 8, R - 2, 16); ctx.fillStyle = FG; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(fmt(pv), L + pw + 6, hover.y);
+    const tt = fullTime(candles[idx].t), tw = ctx.measureText(tt).width + 12;      // time of the candle under the cursor, on the time axis
+    const tx = Math.max(0, Math.min(x - tw / 2, W - tw));
+    ctx.fillStyle = "#2b3646"; ctx.fillRect(tx, T + ph + 2, tw, 16); ctx.fillStyle = FG; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(tt, tx + tw / 2, T + ph + 10);
   }
 
   // header: Binance last price (the Yahoo QQQ price is updated by the websocket handler above)
