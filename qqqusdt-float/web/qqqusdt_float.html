@@ -50,8 +50,10 @@
   /* six-period view: ?grid=1 is the host (one window, six iframes); every cell is this same page with ?cell=1 */
   #celltf { display:none; font-weight:700; color:var(--accent); }
   body.cell #celltf { display:inline; }
-  body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
+  body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #gobtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
+  #gobox { position:absolute; right:70px; top:8px; z-index:20; display:flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:6px 8px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
+  #gobox input { width:150px; font:inherit; padding:3px 6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
   #gcells { display:none; position:absolute; inset:0; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
   #bibtn { display:none; } body.six #bibtn { display:inline-block; } body.cell #bibtn { display:none !important; }
   body.bi #gcells { grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); }   /* Bi Coin: BTC 1h 1d 1w on top, ETH below, in every window shape */
@@ -75,6 +77,7 @@
     <span id="tfs"></span>
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
     <button id="emabtn" title="EMA 5 / 10 / 20 开/关">EMA</button>
+    <button id="gobtn" title="输入日期时间, 图表跳到那里 (如 2026-11-12 或 2026-11-12 18:30)">跳转</button>
     <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
     <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1h / 1d / 1w">Bi Coin</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
@@ -82,6 +85,7 @@
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
   </div>
   <div id="wrap"><canvas id="cv"></canvas><div id="gcells"></div><div id="msg"></div><div id="toast"></div>
+  <div id="gobox" style="display:none"><input id="goin" type="text" placeholder="2026-11-12 18:30" spellcheck="false"><button id="gook">跳转</button><button id="gox">✕</button></div>
   </div>
   </div>
   <div id="tp">
@@ -276,12 +280,13 @@ function recomputeBands() {
 function applyKline(k) {          // k: {t,o,h,l,c,v}
   const last = candles[candles.length - 1];
   if (last && last.t === k.t) candles[candles.length - 1] = k;
-  else if (!last || k.t > last.t) { candles.push(k); if (candles.length > 1500) candles.shift(); }
+  else if (!last || k.t > last.t) { candles.push(k); if (candles.length > MAXC) candles.shift(); }
   else return;
   recomputeBands();
 }
-async function fetchKlines(limit) {
-  const u = MK.rest + "?symbol=" + INSTS[inst].sym + "&interval=" + tf + "&limit=" + limit;
+const MAXC = 20000;                  // candles kept in memory (older history is loaded when jumping to an early date)
+async function fetchKlines(limit, endTime) {
+  const u = MK.rest + "?symbol=" + INSTS[inst].sym + "&interval=" + tf + "&limit=" + limit + (endTime ? "&endTime=" + endTime : "");
   const r = await fetch(u);
   if (!r.ok) throw new Error("HTTP " + r.status);
   return (await r.json()).map(parseK);
@@ -336,7 +341,7 @@ async function fetchYahooCandles(incr) {
 }
 function mergeCandles(arr) {
   for (const k of arr) { let i = candles.length - 1; while (i >= 0 && candles[i].t > k.t) i--; if (i >= 0 && candles[i].t === k.t) candles[i] = k; else if (i === candles.length - 1) candles.push(k); }
-  if (candles.length > 1500) candles.splice(0, candles.length - 1500);
+  if (candles.length > MAXC) candles.splice(0, candles.length - MAXC);
   recomputeBands();
 }
 async function startYahooData(my) {
@@ -523,13 +528,23 @@ function render() {
   }
 
   if (emaOn) {          // EMA curve, drawn over the candles
-    ctx.setLineDash([]); ctx.lineWidth = 1.3;
+    ctx.setLineDash([]); ctx.lineWidth = 2.4;
     emas.forEach((ea, k) => {
       ctx.beginPath(); ctx.strokeStyle = ECOL[k]; let st = false;
       for (let i = i0; i <= i1; i++) { if (ea[i] == null) continue; const x = xOf(i), y = yOf(ea[i]); if (!st) { ctx.moveTo(x, y); st = true; } else ctx.lineTo(x, y); }
       ctx.stroke();
     });
     ctx.lineWidth = 1;
+    const lab = [];      // each line is named at its right end: 5 / 10 / 20
+    emas.forEach((ea, k) => { let j = i1; while (j > i0 && ea[j] == null) j--; if (ea[j] != null) lab.push({ k, x: xOf(j), y: yOf(ea[j]) }); });
+    lab.sort((a, b) => a.y - b.y);
+    for (let q = 1; q < lab.length; q++) if (lab[q].y < lab[q - 1].y + 13) lab[q].y = lab[q - 1].y + 13;
+    ctx.font = "bold 11px -apple-system,Segoe UI,Microsoft YaHei,sans-serif"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    for (const o of lab) {
+      const t = "EMA" + NES[o.k], w = ctx.measureText(t).width, x = Math.min(o.x + 6, L + pw - w - 2);
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(16,21,28,0.9)"; ctx.strokeText(t, x, o.y); ctx.fillStyle = ECOL[o.k]; ctx.fillText(t, x, o.y);
+    }
+    ctx.font = "11px -apple-system,Segoe UI,Microsoft YaHei,sans-serif"; ctx.lineWidth = 1;
   }
 
   // last price line
@@ -596,6 +611,51 @@ function render() {
   const px = ticker && Date.now() - tickerAt < 15000 ? ticker.c : lc.c;
   $("px").textContent = fmt(px);
 }
+
+// ---------- jump to a date ----------
+function parseWhen(t) {
+  t = String(t).trim(); let m;
+  if ((m = t.match(/^(\d{4})(\d{2})(\d{2})$/))) return new Date(+m[1], m[2] - 1, +m[3]).getTime();
+  const a = t.split(/\D+/).filter(x => x !== "").map(Number);
+  if (a.length < 2 || a[0] < 1990 || a[0] > 2100 || a[1] < 1 || a[1] > 12) return NaN;
+  const d = new Date(a[0], a[1] - 1, a[2] || 1, a[3] || 0, a[4] || 0);
+  return isNaN(d) ? NaN : d.getTime();
+}
+let jumping = false;
+async function jumpTo(target) {
+  if (jumping || !candles.length) return; jumping = true;
+  try {
+    if (target < candles[0].t && !MOCK) {
+      if (dsrc === "yahoo") toast("Yahoo 数据最早只到 " + fullTime(candles[0].t));
+      else {
+        toast("加载更早的K线…"); const my = gen;
+        for (let it = 0; it < 40 && candles[0].t > target && candles.length < MAXC; it++) {
+          const arr = (await fetchKlines(1000, candles[0].t - 1)).filter(k => k.t < candles[0].t);
+          if (my !== gen) return;
+          if (!arr.length) break;
+          candles = arr.concat(candles);
+        }
+        recomputeBands();
+        if (candles[0].t > target) toast("只能加载到 " + fullTime(candles[0].t));
+      }
+    }
+    let idx = 0; for (let i = 0; i < candles.length; i++) { if (candles[i].t <= target) idx = i; else break; }
+    if (target > candles[candles.length - 1].t + TF_MS[tf]) { idx = candles.length - 1; toast("晚于最新K线, 已回到最新"); }
+    const n = Math.round(view.n);
+    view.off = candles.length - 1 - idx - n / 2;
+    hover = { x: (cv.getBoundingClientRect().width - 68) / 2 + 6, y: 40 };
+    render();
+  } catch (e) { toast("跳转失败: " + e.message); } finally { jumping = false; }
+}
+function goClose() { $("gobox").style.display = "none"; }
+function goDo() {
+  const t = parseWhen($("goin").value);
+  if (isNaN(t)) { toast("格式: 2026-11-12 或 2026-11-12 18:30"); return; }
+  goClose(); jumpTo(t);
+}
+$("gobtn").onclick = () => { const b = $("gobox"); if (b.style.display === "none") { b.style.display = "flex"; $("goin").focus(); $("goin").select(); } else goClose(); };
+$("gook").onclick = goDo; $("gox").onclick = goClose;
+$("goin").addEventListener("keydown", e => { if (e.key === "Enter") goDo(); else if (e.key === "Escape") goClose(); });
 
 // ---------- interaction ----------
 cv.addEventListener("mousemove", e => {
