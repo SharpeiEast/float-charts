@@ -50,7 +50,7 @@
   /* six-period view: ?grid=1 is the host (one window, six iframes); every cell is this same page with ?cell=1 */
   #celltf { display:none; font-weight:700; color:var(--accent); }
   body.cell #celltf { display:inline; }
-  body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #gobtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
+  body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #gobtn, body.cell #nowbtn, body.cell #tribtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
   #gobox { position:absolute; right:70px; top:8px; z-index:20; display:flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:6px 8px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
   #gobox input { width:150px; font:inherit; padding:3px 6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
@@ -59,6 +59,8 @@
   body.bi #gcells { grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); }   /* Bi Coin: BTC 1h 1d 1w on top, ETH below, in every window shape */
   body.six #gcells { display:grid; } body.six #cv, body.six #msg, body.six #tfs { display:none !important; }
   @media (max-aspect-ratio: 1/1) { #gcells { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(3, minmax(0, 1fr)); } }
+  body.tri #gcells { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); }   /* Tri: 4h / 1d / 1w / 1M in four panes */
+  body.tri .gc:nth-child(n+5) { display:none; } body.tri #bibtn { display:none !important; }
   .gc { position:relative; min-width:0; min-height:0; overflow:hidden; background:var(--bg); }
   .gc iframe { position:absolute; left:0; top:0; width:100%; height:100%; border:0; display:block; }   /* sized by the cell, never by the iframe's own height (WebKit let the rows grow past the window) */
 </style>
@@ -78,6 +80,8 @@
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
     <button id="emabtn" title="EMA 5 / 10 / 20 开/关">EMA</button>
     <button id="gobtn" title="输入日期时间, 图表跳到那里; 之后切换周期都保持在这个时间 (如 2026-11-12 或 2026-11-12 18:30)">To</button>
+    <button id="nowbtn" title="回到最新时间 (取消时间锚点, 跟随最新K线)">Now</button>
+    <button id="tribtn" title="Tri: 4h 1d 1w 1M in four panes">Tri</button>
     <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
     <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1h / 1d / 1w">Bi Coin</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
@@ -221,13 +225,15 @@ function setTf(t) {
 
 // ---------- six-period view: six cells (this same page with ?cell=1) inside the chart area; the SIMU panel stays usable ----------
 const SIXTF = ["3m", "5m", "15m", "30m", "1h", "4h"];
-let six = false, sixFrames = [], cellSim = { poss: {}, ords: {} };
+let six = false, tri = false, sixFrames = [], cellSim = { poss: {}, ords: {} };
 let bi = false;
+const TRITF = ["4h", "1d", "1w", "1M"];
 const BI_CELLS = [["btc", "1h"], ["btc", "1d"], ["btc", "1w"], ["eth", "1h"], ["eth", "1d"], ["eth", "1w"]];
 function sixSrc(i, t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local", "bi", "src", "at"].forEach(k => u.delete(k)); if (anchor) u.set("at", anchor); u.set("inst", i); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); if (bi) u.set("bi", "1"); if (INSTS[i].yahoo) u.set("src", dsrc); return location.pathname + "?" + u.toString(); }
-function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (bi ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : sixSrc(inst, SIXTF[n])) : "about:blank"; }); }
+function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (tri ? (n < 4 ? sixSrc(inst, TRITF[n]) : "about:blank") : bi ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : sixSrc(inst, SIXTF[n])) : "about:blank"; }); }
 function setBi(on) {
   if (CELL || bi === on) return;
+  if (on && tri) setTri(false);
   bi = on; document.body.classList.toggle("bi", on); $("bibtn").classList.toggle("on", on);
   if (on && INSTS[inst].yahoo) { bi = on; setInst("btc"); }     // the drop-down on the left must show a coin that is on screen
   sixLoad();
@@ -236,7 +242,8 @@ $("bibtn").onclick = () => setBi(!bi);
 function setSix(on) {
   if (CELL) return;
   if (!on && bi) { bi = false; document.body.classList.remove("bi"); $("bibtn").classList.remove("on"); }
-  six = on; document.body.classList.toggle("six", on); $("gridbtn").textContent = on ? "Single" : "Six";
+  if (!on) tri = false;
+  six = on; document.body.classList.toggle("six", on); document.body.classList.toggle("tri", tri); $("gridbtn").textContent = on && !tri ? "Single" : "Six"; $("tribtn").textContent = tri ? "Single" : "Tri";
   if (!sixFrames.length) SIXTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gcells").appendChild(d); sixFrames.push(f); });
   sixLoad();
   try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) pywebview.api.set_grid(on); } catch (e) {}
@@ -256,7 +263,14 @@ if (CELL) window.addEventListener("message", e => {
   render();
 });
 else setInterval(sixPush, 500);
-$("gridbtn").onclick = () => setSix(!six);
+$("gridbtn").onclick = () => { if (tri) { tri = false; setSix(true); } else setSix(!six); };
+function setTri(on) {
+  if (CELL) return;
+  if (on && bi) { bi = false; document.body.classList.remove("bi"); $("bibtn").classList.remove("on"); }
+  tri = on; setSix(on);
+}
+$("tribtn").onclick = () => setTri(!tri);
+$("nowbtn").onclick = () => { anchor = null; view.off = 0; hover = null; render(); sixPush(); };
 
 // ---------- data ----------
 function parseK(a) { return { t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5] }; }
@@ -629,7 +643,7 @@ async function jumpTo(target) {
   if (!candles.length) return; const sq = ++jumpSeq, say = CELL ? () => {} : toast;
   try {
     if (target < candles[0].t && !MOCK) {
-      if (dsrc === "yahoo") say("Yahoo 数据最早只到 " + fullTime(candles[0].t));
+      if (dsrc === "yahoo") { if (CELL) return; say("Yahoo 数据最早只到 " + fullTime(candles[0].t)); }
       else {
         say("加载更早的K线…"); const my = gen;
         for (let it = 0; it < 40 && candles[0].t > target && candles.length < MAXC; it++) {
@@ -639,7 +653,7 @@ async function jumpTo(target) {
           candles = arr.concat(candles);
         }
         recomputeBands();
-        if (candles[0].t > target) say("只能加载到 " + fullTime(candles[0].t));
+        if (candles[0].t > target) { if (CELL) return; say("只能加载到 " + fullTime(candles[0].t)); }
       }
     }
     let idx = 0; for (let i = 0; i < candles.length; i++) { if (candles[i].t <= target) idx = i; else break; }
