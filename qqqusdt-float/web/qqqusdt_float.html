@@ -551,15 +551,14 @@ function render() {
       ctx.stroke();
     });
     ctx.lineWidth = 1;
-    const lab = [];      // each line is named at its right end: 5 / 10 / 20
-    emas.forEach((ea, k) => { let j = i1; while (j > i0 && ea[j] == null) j--; if (ea[j] != null) lab.push({ k, x: xOf(j), y: yOf(ea[j]) }); });
-    lab.sort((a, b) => a.y - b.y);
-    for (let q = 1; q < lab.length; q++) if (lab[q].y < lab[q - 1].y + 13) lab[q].y = lab[q - 1].y + 13;
-    ctx.font = "bold 11px -apple-system,Segoe UI,Microsoft YaHei,sans-serif"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    for (const o of lab) {
-      const t = "EMA" + NES[o.k], w = ctx.measureText(t).width, x = Math.min(o.x + 6, L + pw - w - 2);
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(16,21,28,0.9)"; ctx.strokeText(t, x, o.y); ctx.fillStyle = ECOL[o.k]; ctx.fillText(t, x, o.y);
-    }
+    // each line is named in the middle of the chart (staggered at 30% / 50% / 70% of the visible width), just above the line, so the latest price stays clear
+    ctx.font = "bold 11px -apple-system,Segoe UI,Microsoft YaHei,sans-serif"; ctx.textBaseline = "middle"; ctx.textAlign = "center";
+    emas.forEach((ea, k) => {
+      let j = Math.round(i0 + (i1 - i0) * [0.3, 0.5, 0.7][k]); while (j < i1 && ea[j] == null) j++;
+      if (ea[j] == null) return;
+      const t = "EMA" + NES[k], w = ctx.measureText(t).width, x = Math.max(L + w / 2 + 2, Math.min(xOf(j), L + pw - w / 2 - 2)), y = yOf(ea[j]) - 9;
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(16,21,28,0.9)"; ctx.strokeText(t, x, y); ctx.fillStyle = ECOL[k]; ctx.fillText(t, x, y);
+    });
     ctx.font = "11px -apple-system,Segoe UI,Microsoft YaHei,sans-serif"; ctx.lineWidth = 1;
   }
 
