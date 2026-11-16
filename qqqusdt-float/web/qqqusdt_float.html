@@ -355,8 +355,15 @@ async function fetchYahooCandles(incr) {
   }
   return arr;
 }
+// Yahoo stamps the running weekly / monthly bar with the time of the latest quote (not the start of the period), so that stamp changes at every refresh:
+// bars of the same week / month are the same bar
+const pkey = t => tf === "1M" ? (d => d.getUTCFullYear() * 12 + d.getUTCMonth())(new Date(t)) : tf === "1w" ? Math.floor((Math.floor(t / 864e5) + 3) / 7) : t;
 function mergeCandles(arr) {
-  for (const k of arr) { let i = candles.length - 1; while (i >= 0 && candles[i].t > k.t) i--; if (i >= 0 && candles[i].t === k.t) candles[i] = k; else if (i === candles.length - 1) candles.push(k); }
+  for (const k of arr) {
+    let i = candles.length - 1; const pk = pkey(k.t);
+    while (i >= 0 && pkey(candles[i].t) > pk) i--;
+    if (i >= 0 && pkey(candles[i].t) === pk) { k.t = candles[i].t; candles[i] = k; } else if (i === candles.length - 1) candles.push(k);
+  }
   if (candles.length > MAXC) candles.splice(0, candles.length - MAXC);
   recomputeBands();
 }
