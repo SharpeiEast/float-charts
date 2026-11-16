@@ -50,7 +50,7 @@
   /* six-period view: ?grid=1 is the host (one window, six iframes); every cell is this same page with ?cell=1 */
   #celltf { display:none; font-weight:700; color:var(--accent); }
   body.cell #celltf { display:inline; }
-  body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #gobtn, body.cell #nowbtn, body.cell #tribtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
+  body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #gobtn, body.cell #tribtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
   #gobox { position:absolute; right:70px; top:8px; z-index:20; display:flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:6px 8px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
   #gobox input { width:150px; font:inherit; padding:3px 6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
@@ -80,7 +80,6 @@
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
     <button id="emabtn" title="EMA 5 / 10 / 20 开/关">EMA</button>
     <button id="gobtn" title="输入日期时间, 图表跳到那里; 之后切换周期都保持在这个时间 (如 2026-11-12 或 2026-11-12 18:30)">To</button>
-    <button id="nowbtn" title="回到最新时间 (取消时间锚点, 跟随最新K线)">Now</button>
     <button id="tribtn" title="Tri: 4h 1d 1w 1M in four panes">Tri</button>
     <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
     <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1h / 1d / 1w">Bi Coin</button>
@@ -89,7 +88,7 @@
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
   </div>
   <div id="wrap"><canvas id="cv"></canvas><div id="gcells"></div><div id="msg"></div><div id="toast"></div>
-  <div id="gobox" style="display:none"><input id="goin" type="text" placeholder="2026-11-12 18:30" spellcheck="false"><button id="gook">To</button><button id="gox">✕</button></div>
+  <div id="gobox" style="display:none"><input id="goin" type="text" placeholder="2026-11-12 18:30" spellcheck="false"><button id="gook">To</button><button id="gonow" title="回到最新时间 (取消时间锚点, 跟随最新K线)">Now</button><button id="gox">✕</button></div>
   </div>
   </div>
   <div id="tp">
@@ -270,7 +269,7 @@ function setTri(on) {
   tri = on; setSix(on);
 }
 $("tribtn").onclick = () => setTri(!tri);
-$("nowbtn").onclick = () => { anchor = null; view.off = 0; hover = null; render(); sixPush(); };
+$("gonow").onclick = () => { goClose(); anchor = null; view.off = 0; hover = null; render(); sixPush(); };
 
 // ---------- data ----------
 function parseK(a) { return { t: a[0], o: +a[1], h: +a[2], l: +a[3], c: +a[4], v: +a[5] }; }
@@ -1005,12 +1004,13 @@ $("tpbuy").onclick = () => { tSide = 1; $("tpbuy").classList.add("on"); $("tpput
 $("tpput").onclick = () => { tSide = -1; $("tpput").classList.add("on"); $("tpbuy").classList.remove("on"); hints(); };
 ["tptp", "tpsl", "tpfee", "tplp"].forEach(id => $(id).addEventListener("input", hints));
 function setMode(m) {
-  tMode = m; $("tpmkt").classList.toggle("on", m === "mkt"); $("tplmt").classList.toggle("on", m === "lmt");
+  const prev = tMode; tMode = m; $("tpmkt").classList.toggle("on", m === "mkt"); $("tplmt").classList.toggle("on", m === "lmt");
   $("tp-lr1").style.display = $("tp-lr2").style.display = m === "lmt" ? "" : "none";
   $("tpgo").textContent = m === "lmt" ? "挂单 (到价开仓)" : "开仓 (按现价)";
-  if (m === "lmt" && !$("tplp").value && feed.price != null) $("tplp").placeholder = "现价 " + fmt(feed.price, feed.price >= 1000 ? 1 : 2);
+  if (m === "lmt" && prev !== "lmt" && feed.price != null) $("tplp").value = feed.price.toFixed(feed.price >= 1000 ? 1 : 2);      // the limit price starts at the market price of this moment
   hints();
 }
+$("tplp").addEventListener("focus", () => { if (!$("tplp").value && feed.price != null) { $("tplp").value = feed.price.toFixed(feed.price >= 1000 ? 1 : 2); hints(); $("tplp").select(); } });
 $("tpmkt").onclick = () => setMode("mkt");
 $("tplmt").onclick = () => setMode("lmt");
 
