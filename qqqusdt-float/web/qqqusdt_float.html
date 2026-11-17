@@ -82,8 +82,8 @@
     <button id="emabtn" title="EMA 5 / 10 / 20 开/关">EMA</button>
     <button id="gobtn" title="输入日期时间, 图表跳到那里; 之后切换周期都保持在这个时间 (如 2026-11-12 或 2026-11-12 18:30)">To</button>
     <button id="tribtn" title="Tri: 4h 1d 1w 1M in four panes">Tri</button>
-    <button id="gridbtn" title="Six: 3m 5m 15m 30m 1h 4h in one window">Six</button>
-    <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1h / 1d / 1w">Bi Coin</button>
+    <button id="gridbtn" title="Six: 4h 1h 30m 15m 5m 3m in one window">Six</button>
+    <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1w / 1d / 1h">Bi Coin</button>
     <button id="tbtn" title="模拟合约交易 (练习用, 不记录历史)">SIMU</button>
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
@@ -158,7 +158,7 @@ const INSTS = {      // drop-down order; "yahoo" = the symbol on Yahoo Finance (
   eth: { label: "ETH Perps", sym: "ETHUSDT", short: "ETHUSDT", title: "ETH 永续" }
 };
 let inst = INSTS[Q.get("inst")] ? Q.get("inst") : (INSTS[store("inst")] ? store("inst") : "qqq");
-const srcOf = k => !INSTS[k].yahoo ? "binance" : ((CELL ? Q.get("src") : store("src_" + k)) === "yahoo" ? "yahoo" : "binance");     // which data the page shows for QQQ / TQQQ
+const srcOf = k => !INSTS[k].yahoo ? "binance" : ((CELL ? Q.get("src") : store("src2_" + k)) === "binance" ? "binance" : "yahoo");     // which data the page shows for QQQ / TQQQ: Yahoo unless Binance was picked (src2_ keys: the old src_ choices were the implicit Binance default)
 let dsrc = srcOf(inst);
 const MK = BN;   // Binance endpoints (perpetual or spot)
 const MOCK = Q.has("mock");
@@ -194,7 +194,7 @@ function setInst(k, src) {
   if (!INSTS[k]) return;
   const carry = src || (!CELL && INSTS[inst].yahoo && INSTS[k].yahoo ? dsrc : null);     // QQQ <-> TQQQ keeps the data source (Binance / Yahoo) that is on screen
   inst = k; store("inst", k); view.off = 0; candles = []; bands = []; ticker = null;
-  dsrc = INSTS[k].yahoo && carry ? carry : srcOf(k); if (INSTS[k].yahoo && !CELL) store("src_" + k, dsrc); $("src").value = dsrc; $("src").style.display = INSTS[k].yahoo && !CELL ? "" : "none";
+  dsrc = INSTS[k].yahoo && carry ? carry : srcOf(k); if (INSTS[k].yahoo && !CELL) store("src2_" + k, dsrc); $("src").value = dsrc; $("src").style.display = INSTS[k].yahoo && !CELL ? "" : "none";
   $("inst").value = k;
   $("qpx").style.display = $("ydot").style.display = INSTS[k].yahoo ? "" : "none";
   $("px").textContent = "--"; $("px").title = "币安 " + INSTS[k].short + " 最新价";
@@ -207,7 +207,7 @@ function setInst(k, src) {
 }
 $("inst").onchange = () => setInst($("inst").value);
 $("src").onchange = () => {              // QQQ / TQQQ: Binance perpetual or Yahoo Finance data
-  dsrc = $("src").value; store("src_" + inst, dsrc); candles = []; bands = []; ticker = null; view.off = 0;
+  dsrc = $("src").value; store("src2_" + inst, dsrc); candles = []; bands = []; ticker = null; view.off = 0;
   $("px").title = dsrc === "yahoo" ? "Yahoo 最新价" : "币安 " + INSTS[inst].short + " 最新价";
   if (six && !bi) sixLoad();
   start();
@@ -226,11 +226,11 @@ function setTf(t) {
 }
 
 // ---------- six-period view: six cells (this same page with ?cell=1) inside the chart area; the SIMU panel stays usable ----------
-const SIXTF = ["3m", "5m", "15m", "30m", "1h", "4h"];
+const SIXTF = ["4h", "1h", "30m", "15m", "5m", "3m"];      // large periods first
 let six = false, tri = false, sixFrames = [], cellSim = { poss: {}, ords: {} };
 let bi = false;
-const TRITF = ["4h", "1d", "1w", "1M"];
-const BI_CELLS = [["btc", "1h"], ["btc", "1d"], ["btc", "1w"], ["eth", "1h"], ["eth", "1d"], ["eth", "1w"]];
+const TRITF = ["1M", "1w", "1d", "4h"];
+const BI_CELLS = [["btc", "1w"], ["btc", "1d"], ["btc", "1h"], ["eth", "1w"], ["eth", "1d"], ["eth", "1h"]];
 function sixSrc(i, t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local", "bi", "src", "at"].forEach(k => u.delete(k)); if (anchor) u.set("at", anchor); u.set("inst", i); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); if (bi) u.set("bi", "1"); if (INSTS[i].yahoo) u.set("src", dsrc); return location.pathname + "?" + u.toString(); }
 function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (tri ? (n < 4 ? sixSrc(inst, TRITF[n]) : "about:blank") : bi ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : sixSrc(inst, SIXTF[n])) : "about:blank"; }); }
 function setBi(on) {
@@ -389,7 +389,7 @@ function openSingle(o) {              // double click on a cell of the six-perio
   setSix(false);
   if (TFS.includes(o.tf)) { tf = o.tf; store("tf", tf); document.querySelectorAll("#tfs button").forEach(b => b.classList.toggle("on", b.dataset.tf === tf)); }
   const osrc = INSTS[o.inst].yahoo && (o.src === "yahoo" || o.src === "binance") ? o.src : null;     // the cell's own data source carries over to the big chart
-  if (osrc) store("src_" + o.inst, osrc);
+  if (osrc) store("src2_" + o.inst, osrc);
   view.off = 0;
   if (o.inst !== inst) setInst(o.inst, osrc); else { dsrc = osrc || srcOf(inst); $("src").value = dsrc; reportState(); start(); }
 }
