@@ -1134,8 +1134,9 @@ function cardHints(c) {                          // expected return on margin if
   const one = (inp, hint, kind) => {
     const v = pnum(inp), h = c.querySelector(hint);
     if (!v) { h.textContent = ""; h.className = "hint " + hint.slice(1); return; }
-    const ok = kind === "tp" ? (b.side > 0 ? v > entry : v < entry) : (b.side > 0 ? v < entry : v > entry);
-    if (!ok) { h.textContent = (b.side > 0 === (kind === "tp") ? "须高于" : "须低于") + (q ? "开仓价" : "限价"); h.className = "hint dn " + hint.slice(1); return; }
+    const lim = q ? priceOf(c.dataset.inst, q) : entry;      // an open position is judged against the current price, a pending order against its limit price
+    const ok = kind === "tp" ? (b.side > 0 ? v > lim : v < lim) : (b.side > 0 ? v < lim : v > lim);
+    if (!ok) { h.textContent = (b.side > 0 === (kind === "tp") ? "须高于" : "须低于") + (q ? "现价" : "限价"); h.className = "hint dn " + hint.slice(1); return; }
     const r = roeAt(v, ref); h.textContent = pc(r, 1); h.className = "hint " + (r >= 0 ? "up " : "dn ") + hint.slice(1);
     h.title = ref.fee ? "含开平仓手续费 (杠杆 x 费率), 不含资金费" : "未含手续费";
   };
