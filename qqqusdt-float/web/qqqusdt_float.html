@@ -684,13 +684,27 @@ $("gook").onclick = goDo; $("gox").onclick = goClose;
 $("goin").addEventListener("keydown", e => { if (e.key === "Enter") goDo(); else if (e.key === "Escape") goClose(); });
 
 // ---------- interaction ----------
-cv.addEventListener("mousemove", e => {
-  const r = cv.getBoundingClientRect(); hover = { x: e.clientX - r.left, y: e.clientY - r.top };
-  if (drag) { const step = (r.width - 68) / view.n, dx = e.clientX - drag.x; view.off = drag.off + dx / step; drag.moved = true; render(); } else render();
-});
-cv.addEventListener("mouseleave", () => { hover = null; render(); });
 let drag = null;
-cv.addEventListener("mousedown", e => { drag = { x: e.clientX, off: view.off }; });
+const ptrs = new Map(); let pinch = null;      // active touch/pen/mouse pointers; two fingers = pinch zoom
+cv.style.touchAction = "none";                 // stop the browser turning a finger drag into page scroll / zoom
+cv.addEventListener("pointermove", e => {
+  const r = cv.getBoundingClientRect();
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (e.pointerType === "mouse" || !ptrs.size) hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+  if (pinch && ptrs.size >= 2) {
+    const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinch.d0 > 0 && d > 0) { view.n = Math.max(20, Math.min(400, pinch.n0 * pinch.d0 / d)); drag && (drag.moved = true); }
+    render(); return;
+  }
+  if (drag && drag.id === e.pointerId) { const step = (r.width - 68) / view.n, dx = e.clientX - drag.x; if (Math.abs(dx) > 2) drag.moved = true; view.off = drag.off + dx / step; render(); } else render();
+});
+cv.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") { hover = null; render(); } });
+cv.addEventListener("pointerdown", e => {
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 1) drag = { id: e.pointerId, x: e.clientX, off: view.off };
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y), n0: view.n }; if (drag) drag.moved = true; }
+});
 function endDrag() {          // dragging the chart moves the anchor too: period / instrument switches and the six-period view stay at the time now in the middle
   if (drag && drag.moved && candles.length) {
     const n = Math.round(view.n), end = candles.length - Math.round(view.off);
@@ -700,8 +714,14 @@ function endDrag() {          // dragging the chart moves the anchor too: period
   }
   drag = null;
 }
-window.addEventListener("mouseup", endDrag);
-cv.addEventListener("mouseup", endDrag);
+function ptrUp(e) {
+  ptrs.delete(e.pointerId); pinch = null;
+  if (e.pointerType !== "mouse") hover = null;     // no lingering crosshair after a finger lifts
+  if (ptrs.size === 0) endDrag(); else if (drag && drag.id === e.pointerId) drag = null;
+  render();
+}
+cv.addEventListener("pointerup", ptrUp);
+cv.addEventListener("pointercancel", ptrUp);
 cv.addEventListener("wheel", e => { e.preventDefault(); view.n = Math.max(20, Math.min(400, view.n * (e.deltaY > 0 ? 1.15 : 0.87))); render(); }, { passive: false });
 cv.addEventListener("dblclick", () => {
   if (CELL && window.parent !== window) { try { window.parent.postMessage({ open: { inst, tf, src: dsrc } }, "*"); } catch (e) {} return; }     // six-period view: open this chart as the single chart
