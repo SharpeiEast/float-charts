@@ -52,7 +52,7 @@
   body.cell #celltf { display:inline; }
   body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #gobtn, body.cell #tribtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
   body.lite #tbtn, body.lite #tp { display:none !important; }
-  body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
+  body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot, body.cell #etime { display:none !important; }
   #gobox { position:absolute; right:70px; top:8px; z-index:20; display:flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:6px 8px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
   #gobox input { width:150px; font:inherit; padding:3px 6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
   #gcells { display:none; position:absolute; inset:0; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
@@ -74,7 +74,7 @@
     <select id="inst" title="选择品种"></select>
     <select id="src" title="QQQ / TQQQ 的数据来源: Binance 永续合约 或 Yahoo Finance" style="display:none"><option value="binance">Binance</option><option value="yahoo">Yahoo</option></select>
     <span id="qpx" class="num" title="Yahoo 报价 (含盘前盘后/夜盘)">--</span><span id="ydot" title="Yahoo 推送状态"></span>
-    <span id="px" class="num" title="最新价">--</span><span id="dot" title="连接状态"></span>
+    <span id="px" class="num" title="最新价">--</span><span id="dot" title="连接状态"></span><span id="etime" class="num" title="美东时间 (24 小时制, 自动含夏令时)" style="margin-left:8px;color:var(--muted)">--:--</span>
     <span class="sp"></span>
     <span id="celltf"></span>
     <span id="tfs"></span>
@@ -682,6 +682,11 @@ function goDo() {
 $("gobtn").onclick = () => { const b = $("gobox"); if (b.style.display === "none") { b.style.display = "flex"; $("goin").value = fmtWhen(anchor || Date.now()); $("goin").focus(); $("goin").select(); } else goClose(); };
 $("gook").onclick = goDo; $("gox").onclick = goClose;
 $("goin").addEventListener("keydown", e => { if (e.key === "Enter") goDo(); else if (e.key === "Escape") goClose(); });
+
+// ---------- US Eastern clock (HH:MM, 24h) ----------
+const ETF = new Intl.DateTimeFormat("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+function tickET() { $("etime").textContent = ETF.format(new Date()); }
+tickET(); setInterval(tickET, 5000);
 
 // ---------- interaction ----------
 let drag = null;
