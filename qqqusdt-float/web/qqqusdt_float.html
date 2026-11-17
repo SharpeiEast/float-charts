@@ -1013,7 +1013,7 @@ function showView(v) {                    // "set" = server settings replace the
 // where a limit price sits relative to the market: "limit" = resting order on the better side (fills at the limit price, maker),
 // "stop" = price must first run through the level (fills at the tick that reaches it, taker), "now" = exactly at the market
 const kindOf = (side, lim, cur) => lim === cur ? "now" : ((side > 0) === (lim < cur) ? "limit" : "stop");
-const DEF_LEV = { tqqq: 1, btc: 60, eth: 60 }, levMem = {};      // leverage the new-order form starts with per instrument (10 unless listed here); what you set last for an instrument is remembered while the window is open
+const DEF_LEV = { tqqq: 1, btc: 30, eth: 30 }, levMem = {};      // leverage the new-order form starts with per instrument (10 unless listed here); what you set last for an instrument is remembered while the window is open
 function clampLev() {
   const mx = TR[tInst].max; $("tplv").max = mx; $("tplvn").max = mx;
   let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v; levMem[tInst] = v;
