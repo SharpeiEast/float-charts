@@ -156,3 +156,54 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: qqqusdt-float/out/*.deb
+
+  lite:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: qqqusdt-float
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r app/requirements.txt pyinstaller
+
+      - name: Build the display-only edition (no SIMU)
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name QQQUSDT-Float-Lite --add-data "web;web" app/main.py
+          ls -la dist
+
+      - name: Smoke test
+        continue-on-error: true
+        shell: bash
+        run: |
+          dist/QQQUSDT-Float-Lite.exe --selftest selftest.json --spot &
+          PID=$!
+          for i in $(seq 1 150); do [ -f selftest.json ] && break; sleep 1; done
+          cat selftest.json || echo "selftest produced no output"
+          kill $PID 2>/dev/null || true
+
+      - name: Collect
+        shell: bash
+        run: |
+          mkdir -p out
+          cp dist/QQQUSDT-Float-Lite.exe out/QQQUSDT-Float-Lite-windows.exe
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QQQUSDT-Float-Lite-windows
+          path: qqqusdt-float/out/*
+
+      - name: Attach to the GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/qqqusdt-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: qqqusdt-float/out/*

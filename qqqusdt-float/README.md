@@ -137,3 +137,7 @@ git push origin qqqusdt-v0.1.4      # GitHub Actions 构建并把文件挂到这
 ```
 
 只改网页版的话,改 `web/qqqusdt_float.html` 后提交即可;程序版要重新打 tag 才会带上新页面。
+
+## Lite edition (Windows, display only)
+
+`QQQUSDT-Float-Lite-windows.exe` is the same charts without SIMU (no practice-trading panel, no server connection). It keeps its own window settings (`%APPDATA%\qqqusdt-float-lite`). Built from the same sources: the exe name containing "Lite" (or `--lite`) switches it on.

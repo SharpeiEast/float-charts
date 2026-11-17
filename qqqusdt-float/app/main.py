@@ -19,6 +19,7 @@ import urllib.request
 import webview
 
 MAX_WINS = 3
+LITE = "--lite" in sys.argv or "lite" in os.path.basename(sys.executable).lower()      # display-only edition (the exe is named QQQUSDT-Float-Lite): no SIMU panel, no server
 DEFAULT_INSTS = ["qqq", "eth", "btc"]
 DEFAULT_TF = "1h"
 DEFAULT_SRV = "http://100.78.175.68:8765"      # SIMU server (Tailscale address); change it in the panel (gear button)
@@ -40,7 +41,7 @@ def config_path():
         root = os.path.expanduser("~/Library/Application Support")
     else:
         root = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    d = os.path.join(root, "qqqusdt-float")
+    d = os.path.join(root, "qqqusdt-float-lite" if LITE else "qqqusdt-float")
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, "windows.json")
 
@@ -154,7 +155,9 @@ class App:
     # ---- window creation ----
     def _create(self, slot, inst, tf, x, y):
         url = self.html + "?inst=" + str(inst) + "&tf=" + str(tf) + ("&market=spot" if self.spot else "")
-        if self.cfg.get("srv"):
+        if LITE:
+            url += "&lite=1&local"
+        elif self.cfg.get("srv"):
             url += "&srv=" + urllib.parse.quote(str(self.cfg["srv"]), safe="") + "&tok=" + urllib.parse.quote(str(self.cfg.get("tok", "")), safe="")
         else:
             url += "&local"

@@ -51,6 +51,7 @@
   #celltf { display:none; font-weight:700; color:var(--accent); }
   body.cell #celltf { display:inline; }
   body.cell #inst, body.cell #src, body.cell #emabtn, body.cell #gobtn, body.cell #tribtn, body.cell #qpx, body.cell #ydot, body.cell #tfs, body.cell #bb, body.cell #tbtn, body.cell #pip, body.cell #add, body.cell #gridbtn, body.cell #tp { display:none !important; }
+  body.lite #tbtn, body.lite #tp { display:none !important; }
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot { display:none !important; }
   #gobox { position:absolute; right:70px; top:8px; z-index:20; display:flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:6px 8px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
   #gobox input { width:150px; font:inherit; padding:3px 6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
@@ -139,6 +140,8 @@
 "use strict";
 const Q = new URLSearchParams(location.search);
 const CELL = Q.has("cell");
+const LITE = Q.has("lite");          // display-only edition: no SIMU (practice trading) at all
+if (LITE) document.body.classList.add("lite");
 function store(k, v) { try { if (v !== undefined && CELL) return; if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 const MARKETS = {
   perp: { sym: "QQQUSDT", label: "QQQUSDT 永续", short: "QQQUSDT", tag: "永续", rest: "https://fapi.binance.com/fapi/v1/klines", px: "https://fapi.binance.com/fapi/v1/ticker/price", ws: "wss://fstream.binance.com/market/stream" },
@@ -832,7 +835,7 @@ let SRV = null, skew = 0, srvBusy = false, srvOk = null, srvSeen = null;
   if (Q.get("srv")) { store("srv", Q.get("srv")); store("tok", Q.get("tok") || ""); }
   else if (Q.get("tok")) store("tok", Q.get("tok"));
   let u = Q.get("srv") || store("srv") || (SERVED ? location.origin : (store("srv") === null ? "http://100.78.175.68:8765" : ""));
-  if (Q.get("local") != null || CELL) u = "";
+  if (Q.get("local") != null || CELL || LITE) u = "";
   if (u) SRV = { url: u.replace(/\/+$/, ""), tok: Q.get("tok") || store("tok") || "" };
 })();
 async function api(method, path, body) {
@@ -985,7 +988,7 @@ function showView(v) {                    // "set" = server settings replace the
 // where a limit price sits relative to the market: "limit" = resting order on the better side (fills at the limit price, maker),
 // "stop" = price must first run through the level (fills at the tick that reaches it, taker), "now" = exactly at the market
 const kindOf = (side, lim, cur) => lim === cur ? "now" : ((side > 0) === (lim < cur) ? "limit" : "stop");
-const DEF_LEV = { tqqq: 1 }, levMem = {};      // leverage the new-order form starts with per instrument (10 unless listed here); what you set last for an instrument is remembered while the window is open
+const DEF_LEV = { tqqq: 1, btc: 60, eth: 60 }, levMem = {};      // leverage the new-order form starts with per instrument (10 unless listed here); what you set last for an instrument is remembered while the window is open
 function clampLev() {
   const mx = TR[tInst].max; $("tplv").max = mx; $("tplvn").max = mx;
   let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v; levMem[tInst] = v;
