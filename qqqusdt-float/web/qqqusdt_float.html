@@ -28,6 +28,7 @@
   #tbtn.pos { color:var(--up); border-color:var(--up); } #tbtn.neg { color:var(--dn); border-color:var(--dn); }
   #tp { display:none; flex:none; width:250px; box-sizing:border-box; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:8px 10px 10px; font-size:12px; }
   #tp.open { display:block; }
+  #bbrow { display:flex; justify-content:space-between; gap:6px; margin-bottom:6px; font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; } #bbrow b { color:var(--muted); font-weight:600; margin-right:3px; }
   #tp .h { display:flex; align-items:center; gap:6px; margin-bottom:6px; } #tp .h b { font-size:13px; }
   #tp .r { display:flex; align-items:center; gap:6px; margin:5px 0; } #tp .r > span.k { color:var(--muted); width:44px; flex:none; }
   #tp input[type=number], #tp input[type=text] { width:0; flex:1; min-width:0; font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
@@ -93,6 +94,7 @@
   </div>
   </div>
   <div id="tp">
+    <div id="bbrow" title="(现价 - 1小时布林上轨) / 现价 与 (现价 - 1小时布林下轨) / 现价, 依次为 BTC 上轨、BTC 下轨、ETH 上轨、ETH 下轨; 正数绿色, 负数红色"></div>
     <div class="h"><b>模拟合约</b><span class="sp"></span><span id="tppx" class="lb"></span><button id="tpcfg" title="服务器设置">⚙</button><button id="tpx" title="收起">✕</button></div>
     <div class="hint" id="tpsrv" style="text-align:left;margin:-2px 0 4px 0"></div>
     <div id="tp-main">
@@ -1020,11 +1022,34 @@ function clampLev() {
 }
 function useLev() { $("tplvn").value = levMem[tInst] != null ? levMem[tInst] : (DEF_LEV[tInst] || 10); clampLev(); }
 const PANEL_W = 250;
+// ---------- BTC / ETH distance to the hourly Bollinger bands, top row of the SIMU panel ----------
+// (price - band) / price for the upper and the lower band of the 1h (20, 2σ) bands, same formula as the chart; own 1h klines fetch, independent of the charted instrument
+const bbPct = { btc: null, eth: null };
+function bbRender() {
+  const f = v => v == null ? "<span style='color:var(--muted)'>--</span>" : "<span class='" + (v >= 0 ? "up" : "dn") + "'>" + (v >= 0 ? "+" : "") + (v * 100).toFixed(2) + "%</span>";
+  $("bbrow").innerHTML = ["btc", "eth"].map(k => "<span><b>" + SHORT[k] + "</b>" + (bbPct[k] ? f(bbPct[k].u) + " " + f(bbPct[k].l) : f(null) + " " + f(null)) + "</span>").join("");
+}
+async function bbUpdate() {
+  if (!tOpen || document.hidden) return;
+  await Promise.all(["btc", "eth"].map(async k => {
+    try {
+      const r = await fetch(MK.rest + "?symbol=" + INSTS[k].sym + "&interval=1h&limit=" + NB);
+      if (!r.ok) throw 0;
+      const c = (await r.json()).map(parseK); if (c.length < NB) throw 0;
+      let sm = 0, s2 = 0; c.forEach(x => { sm += x.c; s2 += x.c * x.c; });
+      const m = sm / NB, sd = Math.sqrt(Math.max(s2 / NB - m * m, 0)), p = c[c.length - 1].c;
+      bbPct[k] = { u: (p - (m + KB * sd)) / p, l: (p - (m - KB * sd)) / p };
+    } catch (e) { bbPct[k] = null; }
+  }));
+  bbRender();
+}
+bbRender(); setInterval(bbUpdate, 10000);
 function setTrade(open) {
   const was = tOpen;
   tOpen = open; $("tp").classList.toggle("open", open);
   if (open !== was) { try { if (window.pywebview && pywebview.api && pywebview.api.set_panel) pywebview.api.set_panel(open, PANEL_W); } catch (e) {} }
   setTimeout(render, 30);
+  if (open) bbUpdate();
   if (open) { if (SRV || (!pos && !ord)) { tInst = inst; $("tpi").value = tInst; useLev(); } feedStart(!SRV && pos ? pos.inst : !SRV && ord ? ord.inst : tInst); updateTrade(); }
   else if (!pos && !ord) feedStop();
 }
