@@ -57,8 +57,8 @@
   #gobox { position:absolute; right:70px; top:8px; z-index:20; display:flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:6px 8px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
   #gobox input { width:150px; font:inherit; padding:3px 6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
   #gcells { display:none; position:absolute; inset:0; overflow:hidden; background:var(--line); }
-  #gslide { position:absolute; left:0; right:0; display:grid; gap:2px; transition:top .4s ease; }   /* all nine period cells live in this sheet; the buttons slide it up / down inside the clipped #gcells */
-  #sbup, #sbdn { display:none; padding:2px 7px; } body.six:not(.bi) #sbup, body.six:not(.bi) #sbdn { display:inline-block; } body.cell #sbup, body.cell #sbdn { display:none !important; } #sbup:disabled, #sbdn:disabled { opacity:.35; cursor:default; }
+  #gslide { position:absolute; left:0; right:0; display:grid; gap:2px; transition:top .4s ease, left .4s ease; }   /* all nine period cells live in this sheet; the buttons slide it up / down inside the clipped #gcells */
+  #sbup, #sbdn { display:none; padding:2px 7px; } body.six #sbup, body.six #sbdn { display:inline-block; } body.cell #sbup, body.cell #sbdn { display:none !important; } #sbup:disabled, #sbdn:disabled { opacity:.35; cursor:default; }
   #bibtn { display:none; } body.six #bibtn { display:inline-block; } body.cell #bibtn { display:none !important; }
   body.six #gcells { display:block; } body.six #cv, body.six #msg, body.six #tfs { display:none !important; }
   body.tri #bibtn { display:none !important; }
@@ -234,17 +234,31 @@ let bi = false;
 let sixRow = 0, lastLay = "";
 const BI_CELLS = [["btc", "1w"], ["btc", "1d"], ["btc", "1h"], ["eth", "1w"], ["eth", "1d"], ["eth", "1h"]];
 function sixSrc(i, t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local", "bi", "src", "at"].forEach(k => u.delete(k)); if (anchor) u.set("at", anchor); u.set("inst", i); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); if (bi) u.set("bi", "1"); if (INSTS[i].yahoo) u.set("src", dsrc); return location.pathname + "?" + u.toString(); }
-function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (bi ? (n < 6 ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : "about:blank") : sixSrc(inst, ALLTF[n])) : "about:blank"; }); gridLayout(); }
+function sixLoad() { sixFrames.forEach((f, n) => { f.src = !six ? "about:blank" : bi ? sixSrc(n < 9 ? "btc" : "eth", ALLTF[n % 9]) : n < 9 ? sixSrc(inst, ALLTF[n]) : "about:blank"; }); gridLayout(); }
 const portraitMQ = window.matchMedia("(max-aspect-ratio: 1/1)");
-function gridLayout() {       // place the nine period cells on the sheet (explicit grid cells: moving an iframe in the DOM would reload it) and slide the sheet to row sixRow
+function gridLayout() {       // place the period cells on the sheet (explicit grid cells: moving an iframe in the DOM would reload it) and slide the sheet to row / column sixRow
   if (CELL || !sixFrames.length) return;
-  const por = portraitMQ.matches;
-  const cols = bi ? 3 : tri ? 2 : por ? 2 : 3, rows = bi ? 2 : tri ? 2 : por ? 3 : 2;
-  const cells = bi ? [0, 1, 2, 3, 4, 5] : (!tri && por) ? [null, 0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, 1, 2, 3, 4, 5, 6, 7, 8];      // portrait Six: one blank lead cell so that 4h 1h 30m 15m 5m 3m still lands on whole rows
-  const total = Math.ceil(cells.length / cols), maxRow = Math.max(0, total - rows), key = (bi ? "b" : tri ? "t" : "s") + cols;
-  if (key !== lastLay) { lastLay = key; sixRow = tri || bi ? 0 : maxRow; }      // entering a view / turning the window: Tri starts at 1M 1w 1d 4h, Six at 4h 1h 30m 15m 5m 3m
+  const por = portraitMQ.matches, sl = $("gslide");
+  if (bi) {       // Bi Coin: BTC row on top, ETH row below, nine period columns 1M .. 3m, three columns visible; the buttons slide one column; starts at 1d 4h 1h
+    if (lastLay !== "b") { lastLay = "b"; sixRow = 2; }
+    sixRow = Math.max(0, Math.min(6, sixRow));
+    const c = "((100% - 4px) / 3)";
+    sl.style.top = "0"; sl.style.bottom = "0"; sl.style.right = "auto"; sl.style.height = "auto";
+    sl.style.width = "calc(" + c + " * 9 + 16px)"; sl.style.left = "calc(-1 * " + sixRow + " * (" + c + " + 2px))";
+    sl.style.gridTemplateColumns = "repeat(9, minmax(0, 1fr))"; sl.style.gridTemplateRows = "repeat(2, minmax(0, 1fr))";
+    sixFrames.forEach((f, n) => { const d = f.parentNode; d.style.display = ""; d.style.gridRow = n < 9 ? 1 : 2; d.style.gridColumn = (n % 9) + 1; });
+    $("sbup").disabled = sixRow <= 0; $("sbdn").disabled = sixRow >= 6;
+    $("sbup").title = "往左滑: 看更大的周期"; $("sbdn").title = "往右滑: 看更小的周期";
+    return;
+  }
+  sl.style.left = "0"; sl.style.right = "0"; sl.style.width = "auto"; sl.style.bottom = "auto";
+  $("sbup").title = "往上滑: 看更大的周期"; $("sbdn").title = "往下滑: 看更小的周期";
+  const cols = tri ? 2 : por ? 2 : 3, rows = tri ? 2 : por ? 3 : 2;
+  const cells = (!tri && por) ? [null, 0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, 1, 2, 3, 4, 5, 6, 7, 8];      // portrait Six: one blank lead cell so that 4h 1h 30m 15m 5m 3m still lands on whole rows
+  const total = Math.ceil(cells.length / cols), maxRow = Math.max(0, total - rows), key = (tri ? "t" : "s") + cols;
+  if (key !== lastLay) { lastLay = key; sixRow = tri ? 0 : maxRow; }      // entering a view / turning the window: Tri starts at 1M 1w 1d 4h, Six at 4h 1h 30m 15m 5m 3m
   sixRow = Math.max(0, Math.min(maxRow, sixRow));
-  const sl = $("gslide"), c = "((100% - " + (rows - 1) * 2 + "px) / " + rows + ")";
+  const c = "((100% - " + (rows - 1) * 2 + "px) / " + rows + ")";
   sl.style.height = "calc(" + c + " * " + total + " + " + (total - 1) * 2 + "px)";
   sl.style.top = "calc(-1 * " + sixRow + " * (" + c + " + 2px))";
   sl.style.gridTemplateColumns = "repeat(" + cols + ", minmax(0, 1fr))"; sl.style.gridTemplateRows = "repeat(" + total + ", minmax(0, 1fr))";
@@ -267,7 +281,7 @@ function setSix(on) {
   if (!on && bi) { bi = false; document.body.classList.remove("bi"); $("bibtn").classList.remove("on"); }
   if (!on) { tri = false; lastLay = ""; }
   six = on; document.body.classList.toggle("six", on); document.body.classList.toggle("tri", tri); $("gridbtn").textContent = on && !tri ? "Single" : "Six"; $("tribtn").textContent = tri ? "Single" : "Tri";
-  if (!sixFrames.length) ALLTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gslide").appendChild(d); sixFrames.push(f); });
+  if (!sixFrames.length) ALLTF.concat(ALLTF).forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gslide").appendChild(d); sixFrames.push(f); });
   sixLoad();
   try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) pywebview.api.set_grid(on); } catch (e) {}
   setTimeout(render, 50);
