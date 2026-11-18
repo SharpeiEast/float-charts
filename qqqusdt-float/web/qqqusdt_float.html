@@ -26,9 +26,9 @@
   select option { background:var(--panel); color:var(--fg); }
   #toast { position:absolute; right:10px; top:44px; background:#2b3646; color:var(--fg); padding:4px 10px; border-radius:5px; font-size:12px; display:none; z-index:5; }
   #tbtn.pos { color:var(--up); border-color:var(--up); } #tbtn.neg { color:var(--dn); border-color:var(--dn); }
-  #tp { display:none; flex:none; width:250px; box-sizing:border-box; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:8px 10px 10px; font-size:12px; }
+  #tp { display:none; flex:none; width:280px; box-sizing:border-box; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:8px 10px 10px; font-size:12px; }
   #tp.open { display:block; }
-  #bbrow { display:flex; justify-content:space-between; gap:6px; margin-bottom:6px; font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; } #bbrow b { color:var(--muted); font-weight:600; margin-right:3px; }
+  #bbrow { display:flex; justify-content:space-between; gap:6px; margin-bottom:6px; font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums; } #bbrow b { color:var(--muted); font-weight:600; margin-right:3px; }
   #tp .h { display:flex; align-items:center; gap:6px; margin-bottom:6px; } #tp .h b { font-size:13px; }
   #tp .r { display:flex; align-items:center; gap:6px; margin:5px 0; } #tp .r > span.k { color:var(--muted); width:44px; flex:none; }
   #tp input[type=number], #tp input[type=text] { width:0; flex:1; min-width:0; font:inherit; padding:2px 4px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
@@ -56,13 +56,12 @@
   body.cell #hdr .sp { display:none; } body.cell #hdr { padding:2px 8px; font-size:12px; flex-wrap:nowrap; } body.cell #px, body.cell #dot, body.cell #etime { display:none !important; }
   #gobox { position:absolute; right:70px; top:8px; z-index:20; display:flex; gap:6px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:6px 8px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
   #gobox input { width:150px; font:inherit; padding:3px 6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; }
-  #gcells { display:none; position:absolute; inset:0; grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:2px; overflow:hidden; background:var(--line); }
+  #gcells { display:none; position:absolute; inset:0; overflow:hidden; background:var(--line); }
+  #gslide { position:absolute; left:0; right:0; display:grid; gap:2px; transition:top .4s ease; }   /* all nine period cells live in this sheet; the buttons slide it up / down inside the clipped #gcells */
+  #sbup, #sbdn { display:none; padding:2px 7px; } body.six:not(.bi) #sbup, body.six:not(.bi) #sbdn { display:inline-block; } body.cell #sbup, body.cell #sbdn { display:none !important; } #sbup:disabled, #sbdn:disabled { opacity:.35; cursor:default; }
   #bibtn { display:none; } body.six #bibtn { display:inline-block; } body.cell #bibtn { display:none !important; }
-  body.bi #gcells { grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); }   /* Bi Coin: BTC 1h 1d 1w on top, ETH below, in every window shape */
-  body.six #gcells { display:grid; } body.six #cv, body.six #msg, body.six #tfs { display:none !important; }
-  @media (max-aspect-ratio: 1/1) { #gcells { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(3, minmax(0, 1fr)); } }
-  body.tri #gcells { grid-template-columns:repeat(2, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); }   /* Tri: 4h / 1d / 1w / 1M in four panes */
-  body.tri .gc:nth-child(n+5) { display:none; } body.tri #bibtn { display:none !important; }
+  body.six #gcells { display:block; } body.six #cv, body.six #msg, body.six #tfs { display:none !important; }
+  body.tri #bibtn { display:none !important; }
   .gc { position:relative; min-width:0; min-height:0; overflow:hidden; background:var(--bg); }
   .gc iframe { position:absolute; left:0; top:0; width:100%; height:100%; border:0; display:block; }   /* sized by the cell, never by the iframe's own height (WebKit let the rows grow past the window) */
 </style>
@@ -82,6 +81,7 @@
     <button id="bb" title="布林线 (20, 2σ) 开/关">BL</button>
     <button id="emabtn" title="EMA 5 / 10 / 20 开/关">EMA</button>
     <button id="gobtn" title="输入日期时间, 图表跳到那里; 之后切换周期都保持在这个时间 (如 2026-11-12 或 2026-11-12 18:30)">To</button>
+    <button id="sbup" title="往上滑: 看更大的周期">▲</button><button id="sbdn" title="往下滑: 看更小的周期">▼</button>
     <button id="tribtn" title="Tri: 4h 1d 1w 1M in four panes">Tri</button>
     <button id="gridbtn" title="Six: 4h 1h 30m 15m 5m 3m in one window">Six</button>
     <button id="bibtn" title="Bi Coin: BTC (top) and ETH (bottom), each 1w / 1d / 1h">Bi Coin</button>
@@ -89,7 +89,7 @@
     <button id="pip" title="打开置顶浮窗 (Chrome / Edge 116+)">浮窗</button>
     <button id="add" title="再开一个窗口(最多3个)">＋</button>
   </div>
-  <div id="wrap"><canvas id="cv"></canvas><div id="gcells"></div><div id="msg"></div><div id="toast"></div>
+  <div id="wrap"><canvas id="cv"></canvas><div id="gcells"><div id="gslide"></div></div><div id="msg"></div><div id="toast"></div>
   <div id="gobox" style="display:none"><input id="goin" type="text" placeholder="2026-11-12 18:30" spellcheck="false"><button id="gook">To</button><button id="gonow" title="回到最新时间 (取消时间锚点, 跟随最新K线)">Now</button><button id="gox">✕</button></div>
   </div>
   </div>
@@ -228,13 +228,32 @@ function setTf(t) {
 }
 
 // ---------- six-period view: six cells (this same page with ?cell=1) inside the chart area; the SIMU panel stays usable ----------
-const SIXTF = ["4h", "1h", "30m", "15m", "5m", "3m"];      // large periods first
+const ALLTF = ["1M", "1w", "1d", "4h", "1h", "30m", "15m", "5m", "3m"];      // large periods first; Six shows 6 of them, Tri 4, the up / down buttons slide the window one row at a time
 let six = false, tri = false, sixFrames = [], cellSim = { poss: {}, ords: {} };
 let bi = false;
-const TRITF = ["1M", "1w", "1d", "4h"];
+let sixRow = 0, lastLay = "";
 const BI_CELLS = [["btc", "1w"], ["btc", "1d"], ["btc", "1h"], ["eth", "1w"], ["eth", "1d"], ["eth", "1h"]];
 function sixSrc(i, t) { const u = new URLSearchParams(location.search); ["grid", "srv", "tok", "tf", "inst", "cell", "local", "bi", "src", "at"].forEach(k => u.delete(k)); if (anchor) u.set("at", anchor); u.set("inst", i); u.set("tf", t); u.set("cell", "1"); u.set("local", "1"); if (bi) u.set("bi", "1"); if (INSTS[i].yahoo) u.set("src", dsrc); return location.pathname + "?" + u.toString(); }
-function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (tri ? (n < 4 ? sixSrc(inst, TRITF[n]) : "about:blank") : bi ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : sixSrc(inst, SIXTF[n])) : "about:blank"; }); }
+function sixLoad() { sixFrames.forEach((f, n) => { f.src = six ? (bi ? (n < 6 ? sixSrc(BI_CELLS[n][0], BI_CELLS[n][1]) : "about:blank") : sixSrc(inst, ALLTF[n])) : "about:blank"; }); gridLayout(); }
+const portraitMQ = window.matchMedia("(max-aspect-ratio: 1/1)");
+function gridLayout() {       // place the nine period cells on the sheet (explicit grid cells: moving an iframe in the DOM would reload it) and slide the sheet to row sixRow
+  if (CELL || !sixFrames.length) return;
+  const por = portraitMQ.matches;
+  const cols = bi ? 3 : tri ? 2 : por ? 2 : 3, rows = bi ? 2 : tri ? 2 : por ? 3 : 2;
+  const cells = bi ? [0, 1, 2, 3, 4, 5] : (!tri && por) ? [null, 0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, 1, 2, 3, 4, 5, 6, 7, 8];      // portrait Six: one blank lead cell so that 4h 1h 30m 15m 5m 3m still lands on whole rows
+  const total = Math.ceil(cells.length / cols), maxRow = Math.max(0, total - rows), key = (bi ? "b" : tri ? "t" : "s") + cols;
+  if (key !== lastLay) { lastLay = key; sixRow = tri || bi ? 0 : maxRow; }      // entering a view / turning the window: Tri starts at 1M 1w 1d 4h, Six at 4h 1h 30m 15m 5m 3m
+  sixRow = Math.max(0, Math.min(maxRow, sixRow));
+  const sl = $("gslide"), c = "((100% - " + (rows - 1) * 2 + "px) / " + rows + ")";
+  sl.style.height = "calc(" + c + " * " + total + " + " + (total - 1) * 2 + "px)";
+  sl.style.top = "calc(-1 * " + sixRow + " * (" + c + " + 2px))";
+  sl.style.gridTemplateColumns = "repeat(" + cols + ", minmax(0, 1fr))"; sl.style.gridTemplateRows = "repeat(" + total + ", minmax(0, 1fr))";
+  sixFrames.forEach((f, n) => { const d = f.parentNode, k = cells.indexOf(n); if (k < 0) { d.style.display = "none"; return; } d.style.display = ""; d.style.gridRow = Math.floor(k / cols) + 1; d.style.gridColumn = (k % cols) + 1; });
+  $("sbup").disabled = sixRow <= 0; $("sbdn").disabled = sixRow >= maxRow;
+}
+function sixSlide(dir) { sixRow += dir; gridLayout(); }
+$("sbup").onclick = () => sixSlide(-1); $("sbdn").onclick = () => sixSlide(1);
+if (portraitMQ.addEventListener) portraitMQ.addEventListener("change", () => gridLayout());
 function setBi(on) {
   if (CELL || bi === on) return;
   if (on && tri) setTri(false);
@@ -246,9 +265,9 @@ $("bibtn").onclick = () => setBi(!bi);
 function setSix(on) {
   if (CELL) return;
   if (!on && bi) { bi = false; document.body.classList.remove("bi"); $("bibtn").classList.remove("on"); }
-  if (!on) tri = false;
+  if (!on) { tri = false; lastLay = ""; }
   six = on; document.body.classList.toggle("six", on); document.body.classList.toggle("tri", tri); $("gridbtn").textContent = on && !tri ? "Single" : "Six"; $("tribtn").textContent = tri ? "Single" : "Tri";
-  if (!sixFrames.length) SIXTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gcells").appendChild(d); sixFrames.push(f); });
+  if (!sixFrames.length) ALLTF.forEach(t => { const d = document.createElement("div"); d.className = "gc"; const f = document.createElement("iframe"); f.title = t; d.appendChild(f); $("gslide").appendChild(d); sixFrames.push(f); });
   sixLoad();
   try { if (window.pywebview && pywebview.api && pywebview.api.set_grid) pywebview.api.set_grid(on); } catch (e) {}
   setTimeout(render, 50);
@@ -1021,7 +1040,7 @@ function clampLev() {
   let v = Math.round(+$("tplvn").value || 1); v = Math.max(1, Math.min(mx, v)); $("tplv").value = v; $("tplvn").value = v; levMem[tInst] = v;
 }
 function useLev() { $("tplvn").value = levMem[tInst] != null ? levMem[tInst] : (DEF_LEV[tInst] || 10); clampLev(); }
-const PANEL_W = 250;
+const PANEL_W = 280;
 // ---------- BTC / ETH distance to the hourly Bollinger bands, top row of the SIMU panel ----------
 // (price - band) / price for the upper and the lower band of the 1h (20, 2σ) bands, same formula as the chart; own 1h klines fetch, independent of the charted instrument
 const bbPct = { btc: null, eth: null };
