@@ -386,6 +386,13 @@ async function fetchYahooCandles(incr) {
   if (!r) throw new Error(j && j.chart && j.chart.error ? j.chart.error.description : "没有数据");
   const ts = r.timestamp || [], q = r.indicators.quote[0]; let arr = [];
   for (let i = 0; i < ts.length; i++) { if (q.close[i] == null || q.open[i] == null || q.high[i] == null || q.low[i] == null) continue; arr.push({ t: ts[i] * 1000, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume[i] || 0 }); }
+  if (intra && !YAGG[tf] && arr.length >= 2) {      // besides the real bars Yahoo appends the running bar stamped with the time of the latest quote (e.g. 08:30:34, a new stamp at every refresh): fold it into the bar it belongs to instead of letting each refresh add a new candle
+    const a = arr[arr.length - 1], p = arr[arr.length - 2], T = TF_MS[tf];
+    if (a.t % 60000 !== 0) {
+      if (a.t - p.t < T) { p.c = a.c; p.h = Math.max(p.h, a.h); p.l = Math.min(p.l, a.l); p.v = Math.max(p.v, a.v); arr.pop(); }
+      else a.t = p.t + Math.floor((a.t - p.t) / T) * T;
+    }
+  }
   if (YAGG[tf]) {
     const step = YAGG[tf], out = [];
     for (const k of arr) { const b = Math.floor(k.t / step) * step, l = out[out.length - 1]; if (l && l.t === b) { l.h = Math.max(l.h, k.h); l.l = Math.min(l.l, k.l); l.c = k.c; l.v += k.v; } else out.push({ t: b, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v }); }
