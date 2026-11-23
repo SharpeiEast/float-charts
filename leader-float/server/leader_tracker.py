@@ -29,9 +29,13 @@ RAW = [("5075281354358777856", "熬鹰资本"), ("5140488422016171264", "富一�
 PUBLIC_POS = {"4708220152086930177", "5312928647505109504", "5301374102922594049", "5075332206126952449"}
 COLORS = ["#ff9f1c", "#2ec4b6", "#e71d36", "#9b5de5", "#00bbf9", "#f15bb5", "#fee440", "#8ac926", "#ff595e", "#1982c4",
           "#6a4c93", "#ffca3a", "#4cc9f0", "#f72585", "#90be6d", "#b5838d"]
-names = [n for _, n in RAW]
+# Binance returns no fills and no position history at all for these (checked 2026-11-23), so they are not watched
+EXCLUDE = {"4794150057005208320", "5289608959515124481", "5312928647505109504", "5301374102922594049", "5075332206126952449"}
+names = [n for tid, n in RAW if tid not in EXCLUDE]
 TRADERS = []
-for i, (tid, n) in enumerate(RAW):
+for i, (tid, n) in enumerate(RAW):                      # colour = original index, so it stays stable when someone is excluded
+    if tid in EXCLUDE:
+        continue
     nm = n + "#" + tid[-4:] if names.count(n) > 1 else n
     TRADERS.append(dict(id=tid, name=nm, short=n[:2], color=COLORS[i], public_pos=tid in PUBLIC_POS))
 TID = {t["id"]: t for t in TRADERS}
