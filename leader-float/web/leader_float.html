@@ -50,9 +50,10 @@ tr.row:hover{background:#1c2330}
     </div>
     <div id="tablewrap">
       <table>
-        <thead><tr><th>时间(东京)</th><th>交易员</th><th>币</th><th>动作</th><th class="num">数量</th><th class="num">均价</th><th class="num">名义</th><th class="num">杠杆</th><th class="num">已实现盈亏</th></tr></thead>
+        <thead><tr><th>交易员</th><th>币</th><th>方向</th><th class="num">数量</th><th class="num">开仓均价</th><th class="num">现价</th><th class="num">浮盈(USDT)</th><th class="num">名义</th><th class="num">杠杆</th><th>开仓时间(东京)</th></tr></thead>
         <tbody id="tb"></tbody>
       </table>
+      <div id="notes" class="mut" style="padding:8px 10px;font-size:12px;line-height:1.6"></div>
     </div>
   </div>
   <div id="right">
@@ -207,26 +208,35 @@ async function loadMeta() {
   } catch (e) { $('status').textContent = '连接服务失败'; }
 }
 async function loadTable() {
-  if (!meta || !st.sel || !st.sel.length) { $('tb').innerHTML = '<tr><td colspan="9" class="mut" style="padding:16px">请在左上角「盯盘对象」里勾选要看的人</td></tr>'; tableActions = []; return; }
-  try {
-    const [a, b] = await Promise.all(['ETHUSDT', 'BTCUSDT'].map(s => jget(`/api/actions?inst=${s}&traders=${st.sel.join(',')}&limit=200`)));
-    tableActions = a.actions.concat(b.actions).sort((x, y) => y.t1 - x.t1).slice(0, 400);
-  } catch (e) { return; }
-  const tb = $('tb'); tb.innerHTML = '';
-  if (!tableActions.length) { tb.innerHTML = '<tr><td colspan="9" class="mut" style="padding:16px">所选的人暂时没有 BTC/ETH 的动作记录（采集器在后台继续下载）</td></tr>'; return; }
-  for (const a of tableActions) {
-    const t = meta.byId[a.trader]; const tr = document.createElement('tr'); tr.className = 'row';
-    const lab = (a.kind === 'open' ? '开' : '平') + (a.dir === 'long' ? '多' : '空');
-    const dec = a.inst === 'BTCUSDT' ? 3 : 2;
-    const tm = a.t0 === a.t1 ? fmtT(a.t0) : fmtT(a.t0);
-    tr.innerHTML = `<td>${tm}</td><td><span class="dot" style="background:${t.color}"></span> ${t.name}</td><td><span class="tag">${SYMN[a.inst]}</span></td>` +
-      `<td class="${a.dir}">${lab}${a.src === 'pos' ? ' <span class="tag" title="仓位级记录：只有开仓/平仓时刻，没有逐笔加减仓">仓</span>' : ''}</td><td class="num">${a.qty.toLocaleString('en-US', {maximumFractionDigits: dec})}</td>` +
-      `<td class="num">${a.price.toLocaleString('en-US', {maximumFractionDigits: 2})}</td><td class="num">${(a.notional / 1e4).toFixed(1)}万</td>` +
-      `<td class="num">${a.lev ? a.lev + 'x' : '<span class="mut">-</span>'}</td>` +
-      `<td class="num ${a.kind === 'close' ? (a.pnl >= 0 ? 'long' : 'short') : 'mut'}">${a.kind === 'close' ? (a.pnl >= 0 ? '+' : '') + Math.round(a.pnl).toLocaleString() : '-'}</td>`;
-    tr.onclick = () => gotoAction(a);
+  const tb = $('tb');
+  if (!meta || !st.sel || !st.sel.length) { tb.innerHTML = '<tr><td colspan="10" class="mut" style="padding:16px">请在左上角「盯盘对象」里勾选要看的人</td></tr>'; $('notes').textContent = ''; tableActions = []; return; }
+  let j;
+  try { j = await jget(`/api/holdings?traders=${st.sel.join(',')}`); } catch (e) { return; }
+  tableActions = j.holdings;
+  tb.innerHTML = '';
+  if (!j.holdings.length) tb.innerHTML = '<tr><td colspan="10" class="mut" style="padding:16px">所选的人此刻没有持仓</td></tr>';
+  const fp = (v, d) => v == null ? '-' : v.toLocaleString('en-US', {maximumFractionDigits: d});
+  for (const h of j.holdings) {
+    const t = meta.byId[h.trader]; if (!t) continue;
+    const tr = document.createElement('tr'); tr.className = 'row';
+    const sym = h.symbol.replace(/USDT$/, ''), big = h.symbol === 'BTCUSDT' || h.symbol === 'ETHUSDT';
+    const pd = h.entry >= 100 ? 2 : h.entry >= 1 ? 4 : 6, up = h.upnl;
+    tr.innerHTML = `<td><span class="dot" style="background:${t.color}"></span> ${t.name}</td><td><span class="tag"${big ? ' style="background:#3a3320"' : ''}>${sym}</span></td>` +
+      `<td class="${h.dir}">${h.dir === 'long' ? '多' : '空'}</td><td class="num">${fp(h.qty, big ? 3 : 2)}</td><td class="num">${fp(h.entry, pd)}</td><td class="num">${fp(h.mark, pd)}</td>` +
+      `<td class="num ${up == null ? 'mut' : up >= 0 ? 'long' : 'short'}">${up == null ? '-' : (up >= 0 ? '+' : '') + Math.round(up).toLocaleString()}</td>` +
+      `<td class="num">${(h.notional / 1e4).toFixed(1)}万</td><td class="num">${h.lev ? (h.lev_guess ? '~' : '') + h.lev + 'x' : '<span class="mut">-</span>'}</td>` +
+      `<td>${h.opened ? fmtT(h.opened) : '<span class="mut">-</span>'}</td>`;
+    if (big) tr.onclick = () => gotoAction({inst: h.symbol, t0: h.opened || Date.now()});
+    else tr.style.cursor = 'default';
     tb.appendChild(tr);
   }
+  const notes = [];
+  const est = st.sel.filter(id => j.live[id] === false), live = st.sel.filter(id => j.live[id]);
+  if (live.length) notes.push('公开持仓（币安实时）：' + live.map(id => meta.byId[id].name).join('、'));
+  if (est.length) notes.push('隐藏持仓的人由成交记录推算，杠杆前带 ~ 表示取自他上一次同币种仓位；点 BTC/ETH 行，图会跳到开仓时间。');
+  const un = est.filter(id => (j.older[id] || 0) > 0).map(id => meta.byId[id].name + ' ' + j.older[id] + ' 个');
+  if (un.length) notes.push('另有早于已存成交记录开仓、剩余数量未知而未列出的仓位：' + un.join('，') + '。');
+  $('notes').innerHTML = notes.join('<br>');
 }
 
 // ------------------------------------------------------------ boot

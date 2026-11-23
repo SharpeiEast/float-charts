@@ -226,6 +226,117 @@ def meta():
 
 
 _kc = {}
+_cache = {}
+
+
+def cached(key, ttl, fn):
+    c = _cache.get(key)
+    if c and time.time() - c[0] < ttl:
+        return c[1]
+    v = fn()
+    _cache[key] = (time.time(), v)
+    return v
+
+
+def mark_prices():
+    def go():
+        d = json.load(urllib.request.urlopen(urllib.request.Request("https://fapi.binance.com/fapi/v1/ticker/price", headers={"User-Agent": "Mozilla/5.0"}), timeout=20))
+        return {x["symbol"]: float(x["price"]) for x in d}
+    return cached("mark", 3, go)
+
+
+def position_show(tid):
+    def go():
+        r = urllib.request.Request(BAPI + "detail?portfolioId=" + tid, headers={"clienttype": "web", "User-Agent": "Mozilla/5.0"})
+        return bool((json.load(urllib.request.urlopen(r, timeout=20)).get("data") or {}).get("positionShow"))
+    try:
+        return cached("show" + tid, 600, go)
+    except Exception:
+        return False
+
+
+def live_positions(tid):
+    def go():
+        r = urllib.request.Request(BAPI.replace("lead-portfolio", "lead-data") + "positions?portfolioId=" + tid, headers={"clienttype": "web", "User-Agent": "Mozilla/5.0"})
+        d = json.load(urllib.request.urlopen(r, timeout=20))
+        if d.get("code") != "000000":
+            raise RuntimeError(str(d.get("message")))
+        return d.get("data") or []
+    return cached("live" + tid, 8, go)
+
+
+def derived_holdings(tid):
+    """Hidden positions: walk the stored fills; a close larger than what we have seen opened is ignored (that part was opened before the first stored fill)."""
+    with LOCK:
+        rows = DB.execute("SELECT time,symbol,side,pside,price,qty,pnl FROM fills WHERE trader=? ORDER BY time", (tid,)).fetchall()
+        lv = DB.execute("SELECT symbol,side,lev,opened FROM positions WHERE trader=? ORDER BY opened", (tid,)).fetchall()
+    st = {}
+    for (tm, sym, side, ps, price, qty, pnl) in rows:
+        if ps == "BOTH":
+            opening = pnl == 0
+            d = ("long" if side == "BUY" else "short") if opening else ("long" if side == "SELL" else "short")
+        else:
+            opening = (ps == "LONG") == (side == "BUY")
+            d = "long" if ps == "LONG" else "short"
+        h = st.setdefault((sym, d), dict(qty=0.0, cost=0.0, t=None))
+        if opening:
+            if h["qty"] <= 1e-12:
+                h["t"] = tm
+            h["qty"] += qty; h["cost"] += qty * price
+        elif h["qty"] > 0:
+            f = min(qty, h["qty"]) / h["qty"]
+            h["cost"] *= 1 - f; h["qty"] -= min(qty, h["qty"])
+            if h["qty"] <= 1e-9 * max(1.0, qty):
+                h["qty"] = 0.0; h["cost"] = 0.0; h["t"] = None
+    out = []
+    for (sym, d), h in st.items():
+        if h["qty"] > 0:
+            last = [l for (s2, sd, l, o) in lv if s2 == sym and sd.lower() == d]
+            out.append(dict(symbol=sym, dir=d, qty=h["qty"], entry=h["cost"] / h["qty"], opened=h["t"], lev=last[-1] if last else None, lev_guess=True, src="est"))
+    return out
+
+
+def get_holdings(ids):
+    px = {}
+    try:
+        px = mark_prices()
+    except Exception:
+        pass
+    res, older, live = [], {}, {}
+    for tid in ids:
+        if tid not in TID:
+            continue
+        rows = None
+        if tid in PUBLIC_POS or position_show(tid):
+            try:
+                rows = []
+                for x in live_positions(tid):
+                    amt = float(x["positionAmount"])
+                    if abs(amt) < 1e-12:
+                        continue
+                    d = "long" if (x["positionSide"] == "LONG" or (x["positionSide"] == "BOTH" and amt > 0)) else "short"
+                    rows.append(dict(symbol=x["symbol"], dir=d, qty=abs(amt), entry=float(x["entryPrice"]), mark=float(x.get("markPrice") or 0) or None,
+                                     upnl=float(x["unrealizedProfit"]), lev=int(x["leverage"]), lev_guess=False, opened=None, src="live"))
+                live[tid] = True
+            except Exception:
+                rows = None
+        if rows is None:
+            live[tid] = False
+            rows = derived_holdings(tid)
+            with LOCK:
+                cov = DB.execute("SELECT MIN(time) FROM fills WHERE trader=?", (tid,)).fetchone()[0] or 0
+                older[tid] = DB.execute("SELECT COUNT(*) FROM positions WHERE trader=? AND closed IS NULL AND opened<?", (tid, cov)).fetchone()[0]
+        for r in rows:
+            m = r.get("mark") or px.get(r["symbol"])
+            r["mark"] = m
+            sg = 1 if r["dir"] == "long" else -1
+            if r.get("upnl") is None and m:
+                r["upnl"] = (m - r["entry"]) * r["qty"] * sg
+            r["notional"] = r["qty"] * (m or r["entry"])
+            r["trader"] = tid
+            res.append(r)
+    res.sort(key=lambda r: -r["notional"])
+    return {"holdings": res, "older": older, "live": live, "now": now_ms()}
 
 
 def klines(q):
@@ -276,6 +387,9 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, meta())
             if u.path == "/api/klines":
                 return self.send(200, klines(q))
+            if u.path == "/api/holdings":
+                ids = [x for x in (q.get("traders", [""])[0]).split(",") if x] or [t["id"] for t in TRADERS]
+                return self.send(200, get_holdings(ids))
             if u.path == "/api/actions":
                 inst = q.get("inst", ["ETHUSDT"])[0]
                 if inst not in SYMS:
