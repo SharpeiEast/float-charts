@@ -1,0 +1,13 @@
+[Unit]
+Description=Leader tracker (Binance copy-trading lead traders: fills collector + page)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /srv/shared/fund/leader_tracker/leader_tracker.py --host 127.0.0.1 --host 100.78.175.68 --host 192.168.1.250 --port 8780
+Restart=always
+RestartSec=5
+StandardOutput=append:/srv/shared/fund/leader_tracker/data/server.log
+StandardError=append:/srv/shared/fund/leader_tracker/data/server.log
+
+[Install]
+WantedBy=default.target
